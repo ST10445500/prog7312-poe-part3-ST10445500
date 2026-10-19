@@ -1,3 +1,4 @@
+using System.Globalization;
 using SmartX.Api.Models.Stream;
 using SmartX.Shared.Models;
 
@@ -75,10 +76,11 @@ namespace SmartX.Api.Services
             switch (packet.Category)
             {
                 case SensorCategory.Environmental:
-                    return $"{packet.Value:0.#}%";
+                    // Invariant, or a comma locale turns 42.5 into 42,5.
+                    return string.Create(CultureInfo.InvariantCulture, $"{packet.Value:0.#}%");
 
                 case SensorCategory.PowerConsumption:
-                    return $"{packet.Value:0}W";
+                    return string.Create(CultureInfo.InvariantCulture, $"{packet.Value:0}W");
 
                 default:
                     return packet.State == true ? "Open" : "Closed";
