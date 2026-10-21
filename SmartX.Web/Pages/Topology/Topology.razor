@@ -1,0 +1,34 @@
+@page "/topology"
+
+<PageTitle>Topology - Smart-X</PageTitle>
+
+<PageHeader Title="Topology"
+            Blurb="How the devices link up to reach the gateway, and which links are carrying a site." />
+
+@if (_loadFailed)
+{
+    <div class="alert alert-danger">
+        Cannot reach the gateway. The mesh on this page may be out of date.
+    </div>
+}
+else if (_loading)
+{
+    <div class="text-center text-muted py-4">
+        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+        Loading...
+    </div>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-body text-center text-muted py-5">
+            No links reported yet. Start the simulator and the mesh will fill in.
+        </div>
+    </div>
+}
+
+@code {
+    // Nothing is fetched yet, the graph and the endpoint come in the next step.
+    private bool _loading;
+    private bool _loadFailed;
+}
