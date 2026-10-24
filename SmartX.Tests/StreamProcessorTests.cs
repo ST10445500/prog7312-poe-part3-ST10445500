@@ -37,13 +37,14 @@ namespace SmartX.Tests
             public StreamStats Stats { get; } = new();
             public ActiveFaults Faults { get; } = new();
             public HistoryLog<HistoryPoint> History { get; } = new(500);
+            public MeshGraph Graph { get; } = new();
 
             public StreamProcessor Build()
             {
                 var sensors = new SensorStore();
 
                 return new StreamProcessor(Queue, Cache, sensors, Alerts, Stats, History, Faults, new AlertRules(), new FailingHub(),
-                    NullLogger<StreamProcessor>.Instance, new StreamSettings(), new InsightService(sensors, Faults));
+                    NullLogger<StreamProcessor>.Instance, new StreamSettings(), new InsightService(sensors, Faults), Graph);
             }
         }
 
@@ -99,6 +100,26 @@ namespace SmartX.Tests
             Assert.NotNull(parts.Cache.Find(MacB));
             Assert.Equal(200, parts.History.Count(MacA));
             Assert.Equal(1, parts.History.Count(MacB));
+        }
+
+        [Fact]
+        public async Task Processor_PacketWithNeighbours_PutsTheLinkInTheGraph()
+        {
+            // Arrange
+            var parts = new Parts();
+            var packet = Moisture(MacA, 50);
+            packet.Neighbours = [new NeighbourLink { MacAddress = MacB, Rssi = -61 }];
+            parts.Queue.Enqueue(packet);
+            var processor = parts.Build();
+
+            // Act
+            await processor.StartAsync(CancellationToken.None);
+            var linked = await WaitForAsync(() => parts.Graph.GetLinks().Count == 1);
+            await processor.StopAsync(CancellationToken.None);
+
+            // Assert
+            Assert.True(linked);
+            Assert.True(parts.Graph.Contains(MacB));
         }
 
         [Fact]

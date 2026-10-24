@@ -1,4 +1,6 @@
 @page "/topology"
+@inject HttpClient Http
+@implements IDisposable
 
 <PageTitle>Topology - Smart-X</PageTitle>
 
@@ -11,14 +13,15 @@
         Cannot reach the gateway. The mesh on this page may be out of date.
     </div>
 }
-else if (_loading)
+
+@if (_mesh == null && !_loadFailed)
 {
     <div class="text-center text-muted py-4">
         <div class="spinner-border spinner-border-sm me-2" role="status"></div>
         Loading...
     </div>
 }
-else
+else if (_mesh is { Nodes.Count: 0 })
 {
     <div class="card mb-4">
         <div class="card-body text-center text-muted py-5">
@@ -26,9 +29,138 @@ else
         </div>
     </div>
 }
+else if (_mesh != null)
+{
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <span class="text-muted small">
+            @_mesh.Nodes.Count devices, @_mesh.Links.Count links
+        </span>
+
+        @if (_lastUpdated != null)
+        {
+            <span class="text-muted small">
+                <span class="live-dot me-1"></span>Updated @_lastUpdated.Value.ToLocalTime().ToString("HH:mm:ss")
+            </span>
+        }
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-lg-6">
+            <h2 class="h5">Devices</h2>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Device</th>
+                            <th>Mac Address</th>
+                            <th>Hops</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var node in _mesh.Nodes)
+                        {
+                            <tr>
+                                <td>@node.Name</td>
+                                <td class="font-monospace">@node.MacAddress</td>
+                                <td>@(node.HopCount?.ToString() ?? "-")</td>
+                                <td>@DescribeStatus(node)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <h2 class="h5">Links</h2>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>From</th>
+                            <th>To</th>
+                            <th>Signal</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var link in _mesh.Links)
+                        {
+                            <tr>
+                                <td class="font-monospace">@link.MacA</td>
+                                <td class="font-monospace">@link.MacB</td>
+                                <td>@link.Rssi dBm</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+}
 
 @code {
-    // Nothing is fetched yet, the graph and the endpoint come in the next step.
-    private bool _loading;
+    private const int PollIntervalMilliseconds = 1000;
+
+    private TopologySnapshot? _mesh;
     private bool _loadFailed;
+    private DateTime? _lastUpdated;
+    private CancellationTokenSource? _polling;
+
+    //says whether a device is the gateway, has gone quiet, or is reporting
+    private static string DescribeStatus(TopologyNode node)
+    {
+        if (node.IsGateway)
+        {
+            return "Gateway";
+        }
+
+        return node.Disconnected ? "Quiet" : "Up";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadMeshAsync();
+
+        _polling = new CancellationTokenSource();
+
+        _ = PollAsync(_polling.Token);
+    }
+
+    private async Task PollAsync(CancellationToken token)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(PollIntervalMilliseconds));
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                await LoadMeshAsync();
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task LoadMeshAsync()
+    {
+        try
+        {
+            _mesh = await Http.GetFromJsonAsync<TopologySnapshot>("api/topology", ApiJsonOptions.Default);
+            _loadFailed = false;
+            _lastUpdated = DateTime.UtcNow;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException)
+        {
+            _loadFailed = true;
+        }
+    }
+
+    public void Dispose()
+    {
+        _polling?.Cancel();
+        _polling?.Dispose();
+    }
 }

@@ -239,6 +239,9 @@ GET {{SmartX.Api_HostAddress}}/api/sensors/AA:BB:CC:DD:EE:01/attachments/0000000
 ### deleting an attachment that does not exist should 404
 DELETE {{SmartX.Api_HostAddress}}/api/sensors/AA:BB:CC:DD:EE:01/attachments/00000000000000000000000000000000
 
+### the mesh, every device the processor has seen or heard about and the links between them
+GET {{SmartX.Api_HostAddress}}/api/topology
+
 ### the command stream snapshot, queue depth plus every device the processor has seen
 GET {{SmartX.Api_HostAddress}}/api/stream/snapshot
 

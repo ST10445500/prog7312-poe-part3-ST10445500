@@ -23,6 +23,7 @@ namespace SmartX.Api.Services
         private readonly StreamStats _stats;
         private readonly HistoryLog<HistoryPoint> _history;
         private readonly ActiveFaults _faults;
+        private readonly MeshGraph _graph;
         private readonly AlertRules _rules;
         private readonly IHubContext<StreamHub> _hub;
         private readonly ILogger<StreamProcessor> _logger;
@@ -36,8 +37,9 @@ namespace SmartX.Api.Services
         private long _lastPush;
         private bool _changed;
 
-        public StreamProcessor(PacketQueue<StreamPacket> queue, DeviceCache cache, SensorStore sensors, AlertQueue<StreamAlert> alerts, StreamStats stats, HistoryLog<HistoryPoint> history, ActiveFaults faults, AlertRules rules, IHubContext<StreamHub> hub, ILogger<StreamProcessor> logger, StreamSettings settings, InsightService insights)
+        public StreamProcessor(PacketQueue<StreamPacket> queue, DeviceCache cache, SensorStore sensors, AlertQueue<StreamAlert> alerts, StreamStats stats, HistoryLog<HistoryPoint> history, ActiveFaults faults, AlertRules rules, IHubContext<StreamHub> hub, ILogger<StreamProcessor> logger, StreamSettings settings, InsightService insights, MeshGraph graph)
         {
+            _graph = graph;
             _insights = insights;
             _settings = settings;
             _hub = hub;
@@ -141,6 +143,9 @@ namespace SmartX.Api.Services
 
             var name = _sensors.Find(packet.MacAddress)?.Location.NodeId ?? packet.MacAddress;
             _cache.Update(packet, name);
+
+            // A device with no neighbours in the packet still becomes a node, it just has no links yet.
+            _graph.UpdateNode(packet.MacAddress, packet.Neighbours);
 
             // The cache has just built the reading text with its unit, so the log reuses it.
             var state = _cache.Find(packet.MacAddress);

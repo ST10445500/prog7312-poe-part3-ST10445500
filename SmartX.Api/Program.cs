@@ -31,6 +31,7 @@ builder.Services.AddSingleton<PacketQueue<StreamPacket>>();
 builder.Services.AddSingleton<AlertQueue<StreamAlert>>();
 builder.Services.AddSingleton(new HistoryLog<HistoryPoint>(streamSettings.HistoryCap));
 builder.Services.AddSingleton<ActiveFaults>();
+builder.Services.AddSingleton<MeshGraph>();
 builder.Services.AddSingleton<AlertRules>();
 builder.Services.AddSingleton<StreamStats>();
 builder.Services.AddSingleton<DeviceCache>();
