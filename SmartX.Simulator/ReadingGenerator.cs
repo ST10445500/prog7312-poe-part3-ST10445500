@@ -71,6 +71,9 @@ namespace SmartX.Simulator
         private readonly int _hopCount;
         private readonly string _protocol;
 
+        //the neighbours this device can hear and where each link's signal sits
+        private readonly List<(string Mac, int Rssi)> _links = new();
+
         private double _value;
         private bool _state;
         private bool _justCommanded;
@@ -80,7 +83,7 @@ namespace SmartX.Simulator
         {
         }
 
-        public ReadingGenerator(SensorCategory category, int seed, DeviceProfile profile)
+        public ReadingGenerator(SensorCategory category, int seed, DeviceProfile profile, IReadOnlyList<string>? neighbours = null)
         {
             _category = category;
             _profile = profile;
@@ -90,6 +93,14 @@ namespace SmartX.Simulator
             _hopCount = 1 + _random.Next(3);
             _protocol = Protocols[seed % Protocols.Length];
             _phaseOffset = _random.Next(1000);
+
+            // Its own Random, so adding links does not shift the values the other seeds already give.
+            var linkRandom = new Random(seed + 7919);
+
+            foreach (var neighbour in neighbours ?? [])
+            {
+                _links.Add((neighbour, -50 - linkRandom.Next(36)));
+            }
 
             _value = category == SensorCategory.PowerConsumption
                 ? (MinWatts + MaxWatts) / 2
@@ -198,6 +209,14 @@ namespace SmartX.Simulator
             reading.HopCount = hops;
             reading.DutyCycle = Math.Round(duty, 1);
             reading.PacketLoss = Math.Round(loss, 1);
+
+            // Left null when the device has no links, the same as a device that does not report them.
+            if (_links.Count > 0)
+            {
+                reading.Neighbours = _links
+                    .Select(link => new NeighbourLink { MacAddress = link.Mac, Rssi = link.Rssi + _random.Next(-3, 4) })
+                    .ToList();
+            }
         }
 
         //..............................................................................//

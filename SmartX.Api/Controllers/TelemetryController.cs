@@ -231,6 +231,7 @@ namespace SmartX.Api.Controllers
                 State = reading.State,
                 RecordedAt = reading.RecordedAt ?? DateTime.UtcNow,
                 Fault = reading.Fault,
+                Neighbours = reading.Neighbours,
                 Radio = new RadioStats
                 {
                     Rssi = reading.Rssi,

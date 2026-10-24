@@ -1,3 +1,5 @@
+using SmartX.Shared.Models;
+
 //ST10445500 - PROG7312 - SmartX POE
 //ReadingDtos
 
@@ -40,6 +42,9 @@ namespace SmartX.Api.Models.Telemetry
 
         //a fault code the device is reporting about itself, such as StuckValve, or null if it has none
         public string? Fault { get; set; }
+
+        //the neighbours the device can hear and how strongly, or null if it did not say
+        public List<NeighbourLink>? Neighbours { get; set; }
     }
 
     //..............................................................................//

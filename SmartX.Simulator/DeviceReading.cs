@@ -1,3 +1,5 @@
+using SmartX.Shared.Models;
+
 //ST10445500 - PROG7312 - SmartX POE
 //DeviceReading
 
@@ -32,6 +34,9 @@ namespace SmartX.Simulator
 
         //a fault code the device reports about itself, such as StuckValve
         public string? Fault { get; set; }
+
+        //the neighbours this device can hear and how strongly, the way a mesh node reports its links
+        public List<NeighbourLink>? Neighbours { get; set; }
     }
 }
 

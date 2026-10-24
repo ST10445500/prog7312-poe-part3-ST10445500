@@ -32,6 +32,9 @@ namespace SmartX.Api.Models.Stream
 
         //a fault code the device reported about itself, or null if it reported none
         public string? Fault { get; set; }
+
+        //the neighbours the device said it could hear, or null if it did not say
+        public List<NeighbourLink>? Neighbours { get; set; }
     }
 }
 

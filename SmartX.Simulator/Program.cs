@@ -126,6 +126,9 @@ Console.WriteLine($"Reporting for {reporting.Count} of {fleet.Count} registered 
 var generators = new Dictionary<string, ReadingGenerator>();
 var perCategory = new Dictionary<SensorCategory, int>();
 
+// Who can hear whom, worked out once so every run has the same mesh.
+var layout = MeshLayout.Build(reporting.Select(sensor => sensor.MacAddress).ToList());
+
 for (var index = 0; index < reporting.Count; index++)
 {
 	// The nth device of a kind gets the nth profile for that kind, so each fleet misbehaves the same way every run.
@@ -133,7 +136,7 @@ for (var index = 0; index < reporting.Count; index++)
 	perCategory.TryGetValue(category, out var position);
 	perCategory[category] = position + 1;
 
-	generators[reporting[index].MacAddress] = new ReadingGenerator(category, index + 1, DeviceProfiles.For(category, position));
+	generators[reporting[index].MacAddress] = new ReadingGenerator(category, index + 1, DeviceProfiles.For(category, position), layout[reporting[index].MacAddress]);
 }
 
 Console.WriteLine($"Backfilling {BackfillReadings} readings per sensor...");
@@ -409,7 +412,8 @@ async Task StreamSensorAsync(SensorRegistration sensor, CancellationToken token)
 					DutyCycle = reading.DutyCycle,
 					PacketLoss = reading.PacketLoss,
 					Protocol = reading.Protocol,
-					Fault = reading.Fault
+					Fault = reading.Fault,
+					Neighbours = reading.Neighbours
 				};
 
 				await gateway.PostReadingAsync(again, token);
