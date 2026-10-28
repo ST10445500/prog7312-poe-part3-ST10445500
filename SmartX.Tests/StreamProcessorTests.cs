@@ -38,13 +38,14 @@ namespace SmartX.Tests
             public ActiveFaults Faults { get; } = new();
             public HistoryLog<HistoryPoint> History { get; } = new(500);
             public MeshGraph Graph { get; } = new();
+            public TelemetryTree Telemetry { get; } = new();
 
             public StreamProcessor Build()
             {
                 var sensors = new SensorStore();
 
                 return new StreamProcessor(Queue, Cache, sensors, Alerts, Stats, History, Faults, new AlertRules(), new FailingHub(),
-                    NullLogger<StreamProcessor>.Instance, new StreamSettings(), new InsightService(sensors, Faults), Graph);
+                    NullLogger<StreamProcessor>.Instance, new StreamSettings(), new InsightService(sensors, Faults), Graph, Telemetry);
             }
         }
 
@@ -120,6 +121,30 @@ namespace SmartX.Tests
             // Assert
             Assert.True(linked);
             Assert.True(parts.Graph.Contains(MacB));
+        }
+
+        [Fact]
+        public async Task Processor_PacketWithRadioStats_PutsThemInTheTelemetryTree()
+        {
+            // Arrange
+            var parts = new Parts();
+            var packet = Moisture(MacA, 50);
+            packet.Radio = new RadioStats { Rssi = -70, HopCount = 2, DutyCycle = 1.5, PacketLoss = 4 };
+            parts.Queue.Enqueue(packet);
+            var processor = parts.Build();
+
+            // Act
+            await processor.StartAsync(CancellationToken.None);
+            var stored = await WaitForAsync(() => parts.Telemetry.Count(MacA) == 1);
+            await processor.StopAsync(CancellationToken.None);
+            var points = parts.Telemetry.GetRange(MacA, DateTime.MinValue, DateTime.MaxValue);
+
+            // Assert
+            Assert.True(stored);
+            Assert.Equal(-70, points[0].Rssi);
+            Assert.Equal(2, points[0].HopCount);
+            Assert.Equal(1.5, points[0].DutyCycle);
+            Assert.Equal(4, points[0].PacketLoss);
         }
 
         [Fact]

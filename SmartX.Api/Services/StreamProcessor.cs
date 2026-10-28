@@ -24,6 +24,7 @@ namespace SmartX.Api.Services
         private readonly HistoryLog<HistoryPoint> _history;
         private readonly ActiveFaults _faults;
         private readonly MeshGraph _graph;
+        private readonly TelemetryTree _telemetry;
         private readonly AlertRules _rules;
         private readonly IHubContext<StreamHub> _hub;
         private readonly ILogger<StreamProcessor> _logger;
@@ -37,8 +38,9 @@ namespace SmartX.Api.Services
         private long _lastPush;
         private bool _changed;
 
-        public StreamProcessor(PacketQueue<StreamPacket> queue, DeviceCache cache, SensorStore sensors, AlertQueue<StreamAlert> alerts, StreamStats stats, HistoryLog<HistoryPoint> history, ActiveFaults faults, AlertRules rules, IHubContext<StreamHub> hub, ILogger<StreamProcessor> logger, StreamSettings settings, InsightService insights, MeshGraph graph)
+        public StreamProcessor(PacketQueue<StreamPacket> queue, DeviceCache cache, SensorStore sensors, AlertQueue<StreamAlert> alerts, StreamStats stats, HistoryLog<HistoryPoint> history, ActiveFaults faults, AlertRules rules, IHubContext<StreamHub> hub, ILogger<StreamProcessor> logger, StreamSettings settings, InsightService insights, MeshGraph graph, TelemetryTree telemetry)
         {
+            _telemetry = telemetry;
             _graph = graph;
             _insights = insights;
             _settings = settings;
@@ -156,6 +158,16 @@ namespace SmartX.Api.Services
                 Reading = state?.Reading ?? string.Empty,
                 State = packet.State,
                 Rssi = packet.Radio.Rssi
+            });
+
+            // The tree keeps the radio side of every reading, which the log above does not.
+            _telemetry.Add(packet.MacAddress, new TelemetryPoint
+            {
+                RecordedAt = packet.RecordedAt,
+                Rssi = packet.Radio.Rssi,
+                HopCount = packet.Radio.HopCount,
+                DutyCycle = packet.Radio.DutyCycle,
+                PacketLoss = packet.Radio.PacketLoss
             });
 
             _changed = true;

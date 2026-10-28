@@ -20,9 +20,11 @@ namespace SmartX.Api.Controllers
         private readonly MeshGraph _graph;
         private readonly DeviceCache _cache;
         private readonly ActiveFaults _faults;
+        private readonly TelemetryTree _telemetry;
 
-        public TopologyController(MeshGraph graph, DeviceCache cache, ActiveFaults faults)
+        public TopologyController(MeshGraph graph, DeviceCache cache, ActiveFaults faults, TelemetryTree telemetry)
         {
+            _telemetry = telemetry;
             _faults = faults;
             _cache = cache;
             _graph = graph;
@@ -45,6 +47,28 @@ namespace SmartX.Api.Controllers
                     .ToList(),
                 TakenAt = DateTime.UtcNow
             };
+        }
+
+        //..............................................................................//
+
+        //retrieves the radio readings a device reported between two moments, oldest first, or everything kept if no range is given
+        [HttpGet("{macAddress}/history")]
+        public ActionResult<List<TelemetryPoint>> GetHistory(string macAddress, DateTime? from = null, DateTime? to = null)
+        {
+            if (!_telemetry.Contains(macAddress))
+            {
+                return NotFound($"The mesh has no readings from {macAddress}.");
+            }
+
+            var start = from ?? DateTime.MinValue;
+            var end = to ?? DateTime.MaxValue;
+
+            if (start > end)
+            {
+                return BadRequest("The start of the range cannot be after the end.");
+            }
+
+            return _telemetry.GetRange(macAddress, start, end);
         }
 
         //..............................................................................//

@@ -242,6 +242,15 @@ DELETE {{SmartX.Api_HostAddress}}/api/sensors/AA:BB:CC:DD:EE:01/attachments/0000
 ### the mesh, every device the processor has seen or heard about and the links between them
 GET {{SmartX.Api_HostAddress}}/api/topology
 
+### the radio readings of one device, oldest first, add from and to as ISO times to narrow it
+GET {{SmartX.Api_HostAddress}}/api/topology/AA:BB:CC:DD:EE:01/history
+
+### a device with no readings should 404
+GET {{SmartX.Api_HostAddress}}/api/topology/00:00:00:00:00:00/history
+
+### a start after the end should 400
+GET {{SmartX.Api_HostAddress}}/api/topology/AA:BB:CC:DD:EE:01/history?from=2030-01-02T00:00:00Z&to=2030-01-01T00:00:00Z
+
 ### the command stream snapshot, queue depth plus every device the processor has seen
 GET {{SmartX.Api_HostAddress}}/api/stream/snapshot
 
