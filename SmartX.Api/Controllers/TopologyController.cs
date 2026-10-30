@@ -51,6 +51,15 @@ namespace SmartX.Api.Controllers
 
         //..............................................................................//
 
+        //retrieves who can still reach the gateway with the quiet devices taken out, and who could carry for each quiet one
+        [HttpGet("reach")]
+        public ActionResult<MeshReach> GetReach()
+        {
+            return _graph.FindReachable(MeshGateway.MacAddress, _faults.GetDisconnected());
+        }
+
+        //..............................................................................//
+
         //retrieves the radio readings a device reported between two moments, oldest first, or everything kept if no range is given
         [HttpGet("{macAddress}/history")]
         public ActionResult<List<TelemetryPoint>> GetHistory(string macAddress, DateTime? from = null, DateTime? to = null)

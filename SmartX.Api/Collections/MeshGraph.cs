@@ -132,6 +132,67 @@ namespace SmartX.Api.Collections
 
         //..............................................................................//
 
+        //walks the mesh breadth first from the gateway, never stepping onto a quiet device, in O(nodes + edges)
+        //reports who is reachable, who is quiet, who is cut off, and which live neighbours each quiet device has left
+        public MeshReach FindReachable(string gatewayMac, ICollection<string> quiet)
+        {
+            var gateway = Key(gatewayMac);
+            var down = quiet.Select(Key).ToHashSet();
+            var seen = new HashSet<string>();
+            var queue = new Queue<string>();
+            var result = new MeshReach();
+
+            lock (_lock)
+            {
+                if (_nodes.ContainsKey(gateway))
+                {
+                    seen.Add(gateway);
+                    queue.Enqueue(gateway);
+                }
+
+                while (queue.Count > 0)
+                {
+                    var current = queue.Dequeue();
+                    result.Reachable.Add(current);
+
+                    foreach (var edge in _nodes[current])
+                    {
+                        // A quiet device is not walked through, so anything behind it has to find another way round.
+                        if (down.Contains(edge.Neighbour) || !seen.Add(edge.Neighbour))
+                        {
+                            continue;
+                        }
+
+                        queue.Enqueue(edge.Neighbour);
+                    }
+                }
+
+                foreach (var (mac, edges) in _nodes)
+                {
+                    if (down.Contains(mac))
+                    {
+                        result.Down.Add(mac);
+                        result.Reroutes[mac] = edges
+                            .Where(edge => seen.Contains(edge.Neighbour))
+                            .Select(edge => edge.Neighbour)
+                            .OrderBy(neighbour => neighbour, StringComparer.Ordinal)
+                            .ToList();
+                    }
+                    else if (!seen.Contains(mac))
+                    {
+                        result.Unreachable.Add(mac);
+                    }
+                }
+            }
+
+            result.Reachable.Sort(StringComparer.Ordinal);
+            result.Down.Sort(StringComparer.Ordinal);
+            result.Unreachable.Sort(StringComparer.Ordinal);
+            return result;
+        }
+
+        //..............................................................................//
+
         //adds a node with no edges if the graph has not met the device, called with the lock held
         private void AddNode(string mac)
         {

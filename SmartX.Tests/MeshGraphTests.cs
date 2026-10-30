@@ -202,6 +202,157 @@ namespace SmartX.Tests
             Assert.Equal(devices, graph.NodeCount);
             Assert.Equal(devices, graph.GetLinks().Count);
         }
+
+        private const string Gateway = MeshGateway.MacAddress;
+
+        // Builds a mesh from pairs of macs, each pair one link.
+        private static MeshGraph Mesh(params (string, string)[] links)
+        {
+            var graph = new MeshGraph();
+
+            foreach (var (a, b) in links)
+            {
+                graph.UpdateNode(a, Hears(b, -60));
+            }
+
+            return graph;
+        }
+
+        [Fact]
+        public void FindReachable_GatewayAlone_OnlyTheGatewayIsReachable()
+        {
+            // Arrange
+            var graph = new MeshGraph();
+            graph.UpdateNode(Gateway, null);
+
+            // Act
+            var reach = graph.FindReachable(Gateway, []);
+
+            // Assert
+            Assert.Equal([Gateway], reach.Reachable);
+            Assert.Empty(reach.Down);
+            Assert.Empty(reach.Unreachable);
+        }
+
+        [Fact]
+        public void FindReachable_GatewayNotInGraph_ReachesNothing()
+        {
+            // Arrange
+            var graph = Mesh((MacA, MacB));
+
+            // Act
+            var reach = graph.FindReachable(Gateway, []);
+
+            // Assert
+            Assert.Empty(reach.Reachable);
+            Assert.Equal([MacA, MacB], reach.Unreachable);
+        }
+
+        [Fact]
+        public void FindReachable_Line_NothingDown_ReachesEveryone()
+        {
+            // Arrange
+            var graph = Mesh((Gateway, MacA), (MacA, MacB));
+
+            // Act
+            var reach = graph.FindReachable(Gateway, []);
+
+            // Assert
+            Assert.Equal(3, reach.Reachable.Count);
+            Assert.Empty(reach.Unreachable);
+        }
+
+        [Fact]
+        public void FindReachable_Line_MiddleDown_CutsOffTheFarEnd()
+        {
+            // Arrange
+            var graph = Mesh((Gateway, MacA), (MacA, MacB));
+
+            // Act
+            var reach = graph.FindReachable(Gateway, [MacA]);
+
+            // Assert
+            Assert.Equal([Gateway], reach.Reachable);
+            Assert.Equal([MacA], reach.Down);
+            Assert.Equal([MacB], reach.Unreachable);
+            Assert.Equal([Gateway], reach.Reroutes[MacA]);
+        }
+
+        [Fact]
+        public void FindReachable_Ring_OneDown_EveryoneElseGoesTheOtherWay()
+        {
+            // Arrange
+            var graph = Mesh((Gateway, MacA), (MacA, MacB), (MacB, MacC), (MacC, Gateway));
+
+            // Act
+            var reach = graph.FindReachable(Gateway, [MacA]);
+
+            // Assert
+            Assert.Equal([Gateway, MacB, MacC], reach.Reachable);
+            Assert.Empty(reach.Unreachable);
+            Assert.Equal([Gateway, MacB], reach.Reroutes[MacA]);
+        }
+
+        [Fact]
+        public void FindReachable_SplitMesh_ReportsTheOtherHalfUnreachable()
+        {
+            // Arrange
+            var graph = Mesh((Gateway, MacA), (MacB, MacC));
+
+            // Act
+            var reach = graph.FindReachable(Gateway, []);
+
+            // Assert
+            Assert.Equal([Gateway, MacA], reach.Reachable);
+            Assert.Equal([MacB, MacC], reach.Unreachable);
+        }
+
+        [Fact]
+        public void FindReachable_QuietMacInLowerCase_StillMatches()
+        {
+            // Arrange
+            var graph = Mesh((Gateway, MacA));
+
+            // Act
+            var reach = graph.FindReachable(Gateway, [MacA.ToLowerInvariant()]);
+
+            // Assert
+            Assert.Equal([MacA], reach.Down);
+            Assert.Equal([Gateway], reach.Reachable);
+        }
+
+        [Fact]
+        public void FindReachable_QuietMacNotInGraph_IsIgnored()
+        {
+            // Arrange
+            var graph = Mesh((Gateway, MacA));
+
+            // Act
+            var reach = graph.FindReachable(Gateway, [MacC]);
+
+            // Assert
+            Assert.Empty(reach.Down);
+            Assert.Equal([Gateway, MacA], reach.Reachable);
+        }
+
+        [Fact]
+        public void FindReachable_LongLine_ReachesTheEnd()
+        {
+            // Arrange
+            var graph = new MeshGraph();
+            graph.UpdateNode(Gateway, Hears("N0", -60));
+
+            for (var i = 0; i < 5000; i++)
+            {
+                graph.UpdateNode($"N{i}", Hears($"N{i + 1}", -60));
+            }
+
+            // Act
+            var reach = graph.FindReachable(Gateway, []);
+
+            // Assert
+            Assert.Equal(5002, reach.Reachable.Count);
+        }
     }
 }
 

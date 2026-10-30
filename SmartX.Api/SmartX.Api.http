@@ -242,6 +242,9 @@ DELETE {{SmartX.Api_HostAddress}}/api/sensors/AA:BB:CC:DD:EE:01/attachments/0000
 ### the mesh, every device the processor has seen or heard about and the links between them
 GET {{SmartX.Api_HostAddress}}/api/topology
 
+### who can still reach the gateway, who is quiet or cut off, and the neighbours that can carry for each quiet device
+GET {{SmartX.Api_HostAddress}}/api/topology/reach
+
 ### the radio readings of one device, oldest first, add from and to as ISO times to narrow it
 GET {{SmartX.Api_HostAddress}}/api/topology/AA:BB:CC:DD:EE:01/history
 
