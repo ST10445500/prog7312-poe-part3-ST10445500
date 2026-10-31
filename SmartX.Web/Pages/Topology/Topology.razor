@@ -1,5 +1,6 @@
 @page "/topology"
 @inject HttpClient Http
+@inject DashboardState State
 @implements IDisposable
 
 <PageTitle>Topology - Smart-X</PageTitle>
@@ -42,6 +43,51 @@ else if (_mesh != null)
                 <span class="live-dot me-1"></span>Updated @_lastUpdated.Value.ToLocalTime().ToString("HH:mm:ss")
             </span>
         }
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                <h2 class="h5 mb-0">Mesh</h2>
+                <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn @(_treeOnly ? "btn-outline-primary" : "btn-primary")" @onclick="() => _treeOnly = false">All links</button>
+                    <button type="button" class="btn @(_treeOnly ? "btn-primary" : "btn-outline-primary")" @onclick="() => _treeOnly = true">Tree only</button>
+                </div>
+            </div>
+
+            <svg class="mesh-svg" viewBox="0 0 500 500" role="img" aria-label="Drawing of the mesh">
+                @foreach (var link in _mesh.Links)
+                {
+                    var inTree = InTree(link);
+
+                    if (_treeOnly && !inTree)
+                    {
+                        continue;
+                    }
+
+                    var from = Position(link.MacA);
+                    var to = Position(link.MacB);
+
+                    <line class="mesh-link @(inTree ? "mesh-link-tree" : "") @(IsQuietLink(link) ? "mesh-link-quiet" : "")"
+                          x1="@from.X" y1="@from.Y" x2="@to.X" y2="@to.Y">
+                        <title>@link.MacA to @link.MacB, @link.Rssi dBm</title>
+                    </line>
+                }
+
+                @foreach (var node in _mesh.Nodes)
+                {
+                    var spot = Position(node.MacAddress);
+
+                    <circle class="@NodeClass(node)" cx="@spot.X" cy="@spot.Y" r="@(node.IsGateway ? 12 : 7)">
+                        <title>@node.Name (@node.MacAddress), hops @(node.HopCount?.ToString() ?? "-")</title>
+                    </circle>
+                }
+            </svg>
+
+            <div class="text-muted small">
+                Blue is up, orange is quiet, red is cut off from the gateway, black is the gateway. Thick blue links are the cheapest routes to the gateway.
+            </div>
+        </div>
     </div>
 
     <div class="row g-3">
@@ -100,12 +146,111 @@ else if (_mesh != null)
 }
 
 @code {
-    private const int PollIntervalMilliseconds = 1000;
+    // The push does the quick refresh, the poll is only the fallback when the hub is down.
+    private const int PollIntervalMilliseconds = 5000;
+
+    private const double Centre = 250;
+    private const double CircleRadius = 210;
 
     private TopologySnapshot? _mesh;
+    private MeshTree? _tree;
     private bool _loadFailed;
+    private bool _loading;
+    private bool _treeOnly;
     private DateTime? _lastUpdated;
     private CancellationTokenSource? _polling;
+
+    private readonly Dictionary<string, (double X, double Y)> _spots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _treePairs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _quiet = new(StringComparer.OrdinalIgnoreCase);
+
+    //places the gateway in the middle and every other device round one circle, in the order the api listed them
+    private void BuildLayout()
+    {
+        _spots.Clear();
+        _treePairs.Clear();
+        _quiet.Clear();
+
+        if (_mesh == null)
+        {
+            return;
+        }
+
+        var others = _mesh.Nodes.Where(n => !n.IsGateway).ToList();
+
+        for (var i = 0; i < others.Count; i++)
+        {
+            var angle = 2 * Math.PI * i / others.Count;
+
+            _spots[others[i].MacAddress] = (Centre + CircleRadius * Math.Cos(angle), Centre + CircleRadius * Math.Sin(angle));
+        }
+
+        foreach (var node in _mesh.Nodes)
+        {
+            if (node.IsGateway)
+            {
+                _spots[node.MacAddress] = (Centre, Centre);
+            }
+
+            if (node.Disconnected)
+            {
+                _quiet.Add(node.MacAddress);
+            }
+        }
+
+        if (_tree != null)
+        {
+            foreach (var edge in _tree.Edges)
+            {
+                _treePairs.Add(PairKey(edge.MacA, edge.MacB));
+            }
+        }
+    }
+
+    //joins two macs in a fixed order so a link reads the same from either end
+    private static string PairKey(string a, string b)
+    {
+        return string.Compare(a, b, StringComparison.OrdinalIgnoreCase) <= 0 ? $"{a}|{b}" : $"{b}|{a}";
+    }
+
+    //retrieves where a device sits in the drawing, the middle if it is not placed
+    private (double X, double Y) Position(string mac)
+    {
+        return _spots.TryGetValue(mac, out var spot) ? spot : (Centre, Centre);
+    }
+
+    //says whether the cheapest-route tree uses this link
+    private bool InTree(TopologyLink link)
+    {
+        return _treePairs.Contains(PairKey(link.MacA, link.MacB));
+    }
+
+    //says whether either end of the link has gone quiet
+    private bool IsQuietLink(TopologyLink link)
+    {
+        return _quiet.Contains(link.MacA) || _quiet.Contains(link.MacB);
+    }
+
+    //picks the colour class for a device: gateway, quiet, cut off from the gateway, or up
+    private string NodeClass(TopologyNode node)
+    {
+        if (node.IsGateway)
+        {
+            return "mesh-node-gateway";
+        }
+
+        if (node.Disconnected)
+        {
+            return "mesh-node-quiet";
+        }
+
+        if (_tree != null && _tree.Unreached.Contains(node.MacAddress, StringComparer.OrdinalIgnoreCase))
+        {
+            return "mesh-node-cut";
+        }
+
+        return "mesh-node-up";
+    }
 
     //says whether a device is the gateway, has gone quiet, or is reporting
     private static string DescribeStatus(TopologyNode node)
@@ -120,11 +265,26 @@ else if (_mesh != null)
 
     protected override async Task OnInitializedAsync()
     {
+        State.OnStreamChanged += OnStreamChanged;
+
         await LoadMeshAsync();
 
         _polling = new CancellationTokenSource();
 
         _ = PollAsync(_polling.Token);
+
+        // Opened after the first load so a slow hub never holds the page up.
+        await State.StartAsync();
+    }
+
+    //reloads the mesh when the api says the stream moved on
+    private void OnStreamChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            await LoadMeshAsync();
+            StateHasChanged();
+        });
     }
 
     private async Task PollAsync(CancellationToken token)
@@ -135,6 +295,11 @@ else if (_mesh != null)
         {
             while (await timer.WaitForNextTickAsync(token))
             {
+                if (!State.Connected)
+                {
+                    await State.StartAsync();
+                }
+
                 await LoadMeshAsync();
                 StateHasChanged();
             }
@@ -146,9 +311,19 @@ else if (_mesh != null)
 
     private async Task LoadMeshAsync()
     {
+        // A burst of pushes would stack requests, one load at a time is enough.
+        if (_loading)
+        {
+            return;
+        }
+
+        _loading = true;
+
         try
         {
             _mesh = await Http.GetFromJsonAsync<TopologySnapshot>("api/topology", ApiJsonOptions.Default);
+            _tree = await Http.GetFromJsonAsync<MeshTree>("api/topology/mst", ApiJsonOptions.Default);
+            BuildLayout();
             _loadFailed = false;
             _lastUpdated = DateTime.UtcNow;
         }
@@ -156,10 +331,16 @@ else if (_mesh != null)
         {
             _loadFailed = true;
         }
+        finally
+        {
+            _loading = false;
+        }
     }
 
     public void Dispose()
     {
+        State.OnStreamChanged -= OnStreamChanged;
+
         _polling?.Cancel();
         _polling?.Dispose();
     }

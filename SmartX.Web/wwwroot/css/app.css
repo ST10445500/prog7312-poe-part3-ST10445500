@@ -564,6 +564,42 @@ body:has(.stream-page) .sx-container {
     background-color: var(--sx-accent);
 }
 
+.mesh-svg {
+    width: 100%;
+    max-width: 560px;
+    height: auto;
+}
+
+.mesh-link {
+    stroke: var(--sx-border);
+    stroke-width: 1;
+}
+
+.mesh-link-tree {
+    stroke: var(--sx-accent);
+    stroke-width: 2.5;
+}
+
+.mesh-link-quiet {
+    stroke-dasharray: 4 3;
+}
+
+.mesh-node-up {
+    fill: var(--sx-accent);
+}
+
+.mesh-node-quiet {
+    fill: var(--sx-warn);
+}
+
+.mesh-node-cut {
+    fill: var(--sx-fault);
+}
+
+.mesh-node-gateway {
+    fill: var(--sx-text);
+}
+
 .ribbon-track {
     display: flex;
     gap: 2px;
