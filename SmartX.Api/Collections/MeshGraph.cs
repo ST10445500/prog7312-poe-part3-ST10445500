@@ -193,6 +193,83 @@ namespace SmartX.Api.Collections
 
         //..............................................................................//
 
+        //grows a minimum spanning tree out from the gateway with Prim, never taking a link to a quiet device
+        //a link costs its signal strength without the minus sign, so a weaker link costs more, and the cheapest link out of the tree is taken each time
+        //O(edges log nodes) with the built-in priority queue, and a tie goes to the lower mac so equal weights give the same tree every time
+        public MeshTree FindSpanningTree(string gatewayMac, ICollection<string> quiet)
+        {
+            var gateway = Key(gatewayMac);
+            var down = quiet.Select(Key).ToHashSet();
+            var inTree = new HashSet<string>();
+            var result = new MeshTree();
+
+            var queue = new PriorityQueue<(string From, string To, int Cost), (int Cost, string To)>(
+                Comparer<(int Cost, string To)>.Create((x, y) =>
+                {
+                    var byCost = x.Cost.CompareTo(y.Cost);
+                    return byCost != 0 ? byCost : string.CompareOrdinal(x.To, y.To);
+                }));
+
+            lock (_lock)
+            {
+                if (_nodes.ContainsKey(gateway))
+                {
+                    inTree.Add(gateway);
+                    PushEdges(queue, gateway, inTree, down);
+                }
+
+                while (queue.Count > 0)
+                {
+                    var (from, to, cost) = queue.Dequeue();
+
+                    // The same device can be queued from two sides, the cheaper one came out first.
+                    if (!inTree.Add(to))
+                    {
+                        continue;
+                    }
+
+                    result.Edges.Add(new TopologyLink { MacA = from, MacB = to, Rssi = -cost });
+                    result.Parents[to] = from;
+                    result.TotalCost += cost;
+                    PushEdges(queue, to, inTree, down);
+                }
+
+                foreach (var mac in _nodes.Keys)
+                {
+                    if (!inTree.Contains(mac) && !down.Contains(mac))
+                    {
+                        result.Unreached.Add(mac);
+                    }
+                }
+            }
+
+            result.Unreached.Sort(StringComparer.Ordinal);
+            return result;
+        }
+
+        //..............................................................................//
+
+        //queues every link out of a node that leads to a live device not yet in the tree, called with the lock held
+        private void PushEdges(
+            PriorityQueue<(string From, string To, int Cost), (int Cost, string To)> queue,
+            string from,
+            HashSet<string> inTree,
+            HashSet<string> down)
+        {
+            foreach (var edge in _nodes[from])
+            {
+                if (inTree.Contains(edge.Neighbour) || down.Contains(edge.Neighbour))
+                {
+                    continue;
+                }
+
+                var cost = Math.Abs(edge.Rssi);
+                queue.Enqueue((from, edge.Neighbour, cost), (cost, edge.Neighbour));
+            }
+        }
+
+        //..............................................................................//
+
         //adds a node with no edges if the graph has not met the device, called with the lock held
         private void AddNode(string mac)
         {

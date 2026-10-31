@@ -245,6 +245,15 @@ GET {{SmartX.Api_HostAddress}}/api/topology
 ### who can still reach the gateway, who is quiet or cut off, and the neighbours that can carry for each quiet device
 GET {{SmartX.Api_HostAddress}}/api/topology/reach
 
+### the cheapest links from the gateway to every live device, weaker signal costs more
+GET {{SmartX.Api_HostAddress}}/api/topology/mst
+
+### the hops from the gateway out to one device, gateway first
+GET {{SmartX.Api_HostAddress}}/api/topology/mst/path/AA:BB:CC:DD:EE:01
+
+### a device with no live path should 404
+GET {{SmartX.Api_HostAddress}}/api/topology/mst/path/00:00:00:00:00:00
+
 ### the radio readings of one device, oldest first, add from and to as ISO times to narrow it
 GET {{SmartX.Api_HostAddress}}/api/topology/AA:BB:CC:DD:EE:01/history
 

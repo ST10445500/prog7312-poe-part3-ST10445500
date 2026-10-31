@@ -60,6 +60,41 @@ namespace SmartX.Api.Controllers
 
         //..............................................................................//
 
+        //retrieves the cheapest set of links from the gateway to every live device, with a quiet device left out
+        [HttpGet("mst")]
+        public ActionResult<MeshTree> GetSpanningTree()
+        {
+            return _graph.FindSpanningTree(MeshGateway.MacAddress, _faults.GetDisconnected());
+        }
+
+        //..............................................................................//
+
+        //retrieves the hops from the gateway out to a device along the spanning tree, gateway first
+        [HttpGet("mst/path/{macAddress}")]
+        public ActionResult<List<string>> GetPath(string macAddress)
+        {
+            var tree = _graph.FindSpanningTree(MeshGateway.MacAddress, _faults.GetDisconnected());
+            var mac = macAddress.ToUpperInvariant();
+
+            if (mac != MeshGateway.MacAddress && !tree.Parents.ContainsKey(mac))
+            {
+                return NotFound($"{macAddress} has no live path to the gateway.");
+            }
+
+            // Walk up the parents to the gateway, then turn it round so the gateway comes first.
+            var path = new List<string> { mac };
+
+            while (path[^1] != MeshGateway.MacAddress)
+            {
+                path.Add(tree.Parents[path[^1]]);
+            }
+
+            path.Reverse();
+            return path;
+        }
+
+        //..............................................................................//
+
         //retrieves the radio readings a device reported between two moments, oldest first, or everything kept if no range is given
         [HttpGet("{macAddress}/history")]
         public ActionResult<List<TelemetryPoint>> GetHistory(string macAddress, DateTime? from = null, DateTime? to = null)
