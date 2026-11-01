@@ -294,6 +294,7 @@ namespace SmartX.Api.Collections
 
             if (existing != null)
             {
+                // Moves a fifth of the way to the new report, so Prim's tree does not swap links over a dB or two.
                 existing.Rssi += (int)Math.Round((rssi - existing.Rssi) * SignalSmoothing);
                 return;
             }

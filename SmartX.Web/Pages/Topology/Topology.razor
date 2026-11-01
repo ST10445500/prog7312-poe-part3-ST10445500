@@ -1110,7 +1110,7 @@ else if (_mesh != null)
         }
         else if (change == LayoutChange.Local)
         {
-            // Why: a device going quiet or coming back should not shift everyone else, so only that device is moved.
+            // A device going quiet or coming back should not shift everyone else, so only that device is moved.
             foreach (var (mac, spot) in _heldSpots)
             {
                 _spots[mac] = spot;
@@ -1122,7 +1122,7 @@ else if (_mesh != null)
         }
         else
         {
-            // Why: the signal on a link wobbles, so the same devices are kept where they were drawn and only the colours and links update.
+            // The signal on a link wobbles, so the same devices are kept where they were drawn and only the colours and links update.
             foreach (var (mac, spot) in _heldSpots)
             {
                 _spots[mac] = spot;
@@ -1208,7 +1208,7 @@ else if (_mesh != null)
             changed = true;
         }
 
-        // Why: parents that change one device at a time can leave a loop, so the live tree is used as it is if they no longer lead to the gateway.
+        // Parents that change one device at a time can leave a loop, so the live tree is used as it is if they no longer lead to the gateway.
         if (changed && !AllReachGateway())
         {
             AdoptLiveTree(live);
@@ -1391,7 +1391,7 @@ else if (_mesh != null)
         var outside = devices.Where(d => !depths.ContainsKey(d.MacAddress)).ToList();
         var deepest = depths.Values.Max();
 
-        // Why: a deeper tree makes the drawing area bigger, it never makes it smaller again.
+        // A deeper tree makes the drawing area bigger, it never makes it smaller again.
         _ringCapacity = Math.Max(_ringCapacity, deepest + 1);
 
         void Spread(string mac, double from, double to)
@@ -1552,6 +1552,7 @@ else if (_mesh != null)
         return IsCutOff(node) ? "Cut off" : "Up";
     }
 
+    //loads the mesh, starts the slow poll and opens the live connection
     protected override async Task OnInitializedAsync()
     {
         State.OnStreamChanged += OnStreamChanged;
@@ -1596,6 +1597,7 @@ else if (_mesh != null)
         }
     }
 
+    //reloads the mesh every few seconds as the fallback for when the live connection is down
     private async Task PollAsync(CancellationToken token)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(PollIntervalMilliseconds));
@@ -1623,6 +1625,7 @@ else if (_mesh != null)
         }
     }
 
+    //asks the api for the mesh, its cheapest tree and who can still reach the gateway, then works out the drawing, the route and the history
     private async Task LoadMeshAsync()
     {
         // A burst of pushes would stack requests, one load at a time is enough.
@@ -1636,6 +1639,7 @@ else if (_mesh != null)
 
         try
         {
+            // Prim's tree and the breadth first reach are worked out by the api, the page only draws what they say.
             _mesh = await Http.GetFromJsonAsync<TopologySnapshot>("api/topology", ApiJsonOptions.Default);
             _tree = await Http.GetFromJsonAsync<MeshTree>("api/topology/mst", ApiJsonOptions.Default);
             _reach = await Http.GetFromJsonAsync<MeshReach>("api/topology/reach", ApiJsonOptions.Default);
@@ -1655,6 +1659,7 @@ else if (_mesh != null)
         }
     }
 
+    //stops listening to the stream and the poll when the page is left
     public void Dispose()
     {
         State.OnStreamChanged -= OnStreamChanged;
