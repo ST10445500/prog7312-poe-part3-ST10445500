@@ -201,26 +201,58 @@ still work in this build.
 ### The Topology page
 
 **Topology** in the top navigation opens `/topology`. It also fills from the simulator.
+The four tiles at the top count the devices, the links, the quiet devices and the cut off
+ones. The bar under them stays in view as you scroll, with the route box (it suggests device
+MACs as you type, and has a clear button), the *All links* / *Tree only* toggle, a badge
+that says *Live* or *Polling*, and a *Pause* button.
 
-**The mesh drawing.** The gateway sits in the middle and the devices sit round a
-circle. A green node is up, an orange one has gone quiet and a red one is cut off,
+**The mesh drawing.** The gateway sits in the middle and every other device sits on a
+ring for how many hops it is from the gateway, with each branch of the tree in its own
+slice of the circle. That is what keeps the thick links from crossing back through the
+middle. Every ring is the same distance from the one inside it, and the drawing has room
+for eight to start with, so a deeper tree adds rings on the outside and nothing else
+changes size. A blue node is up, an orange one has gone quiet and a red one is cut off,
 meaning it is not quiet itself but every way to the gateway goes through a device that
-is. The thick links are the cheapest tree out from the gateway, and the toggle swaps
-between *All links* and *Tree only*. The page reloads when the gateway pushes a change,
-with a slow poll as the fallback.
+is. Cut off and quiet devices sit on the outer ring, *No route*, whatever the depth is.
+The thick links are the cheapest tree out from the gateway, and a device not heard for
+twelve seconds is drawn lighter. The *-*, *Fit* and *+* buttons zoom in on the picked
+device and back out. Names are only written for the gateway, the picked device and the
+devices it can hear, so the drawing stays readable. A link weaker than -80 dBm is drawn
+amber, and pointing at a device, in the drawing or the list, highlights it and its links.
+Every node can also be reached with the keyboard.
+The page reloads when the gateway pushes a change, with a slow poll as the fallback, but
+no more than once every three seconds. The thick links and the route follow a steadier
+copy of the tree the api sends, in which a device only changes parent once the same new
+parent has come back three refreshes in a row, so the links always match where the
+devices are drawn. A device that goes quiet or comes back is the only one that moves.
+The colours and signals still update every time. The *Pause* button holds the picture
+still so it can be read, and *Resume* catches it up.
 
-**The route card.** Type a MAC address into the route box or click a node. The card
-lists the hops from the gateway to that device with the signal on each one, and draws
-the route over the mesh. For a quiet device it lists the neighbours that can still get
-through, and for a cut off one it says so. Typing has to match the MAC exactly.
+**The side panel.** On a wide screen it sits to the right of the drawing and stays in
+view. At the top is the picked device, with its status, hops, the device it hands its
+traffic to (*Via*), how long ago it was heard and the signal on that link. Under that,
+*Needs attention* lists every quiet or cut off device and a click picks it.
 
-**The radio history card.** With a device picked, the card below the route shows its
-signal strength, hop count, duty cycle or packet loss on a chart, with last minute,
-last five minutes or all kept, and the newest fifteen readings in a table. The gateway
-says it sends no readings.
+**The route card.** Type a MAC address into the route box, or click a node, a row in the
+list or a device under *Needs attention*. The card lists the hops from the gateway to that
+device with the signal on each one, coloured green for strong, grey for fair and amber for
+weak, and draws the route over the mesh. The route has a cost too, the sum of its links,
+where a link costs its signal strength without the minus sign, so a weaker link costs
+more. That is the same weight Prim's tree uses, and the *Links* tile shows the cost of
+the whole tree. For a quiet device the card lists the neighbours it could hop to instead
+and draws teal dashes to them, and for a cut off one it lists the quiet neighbours holding
+it up and draws red dashes to them. Typing has to match the MAC exactly.
 
-**The tables.** The Devices table shows each device's state, with *Cut off* where the
-drawing shows red. The Links table lists every link once with its signal.
+**The radio history card.** Under the route card in the same panel. With a device picked,
+it shows its signal strength, hop count, duty cycle or packet loss on a chart, with last
+minute, last five minutes or all kept. The newest fifteen readings are in a table behind
+a *Show* button, so the panel stays short. The gateway says it sends no readings.
+
+**The lists.** Under the drawing, one card with a *Devices* tab and a *Links* tab. Both
+scroll inside the card and both have a search box. Devices also has a status filter, and
+each row shows its hops, the device it goes *Via* and a chip that says *Up*, *Quiet* or
+*Cut off*, where the drawing shows red. Clicking a row picks that device. Links show the
+signal as a coloured chip and can be narrowed to just the picked device.
 
 ---
 
@@ -243,8 +275,11 @@ dotnet run --project SmartX.Simulator -- --kill AA:BB:CC:DD:EE:21
 ```
 
 2. After the relay goes quiet its node turns orange. The device behind it, EE:22, turns
-   red and the Devices table says *Cut off*. The tree redraws without them.
-3. Click EE:21. The route card lists the live neighbours that could still carry for it.
+   red and its chip in the Devices list says *Cut off*. Both move out to the *No route*
+   ring within a few seconds, and *Needs attention* lists them.
+3. Click EE:21. The route card lists the live neighbours it could hop to instead, and
+   teal dashes join them to it. Click EE:22 and red dashes join it to the quiet relay
+   holding it up.
 4. After 40 seconds the relay comes back and both nodes go green again.
 
 If the gateway has only just started, `--kill` can take the relay off before the gateway
@@ -260,7 +295,8 @@ and cut off, and `GET /api/topology/mst` returns the tree.
 1. On Topology, type a device's MAC into the route box, for example
    `AA:BB:CC:DD:EE:05`, or click its node.
 2. In the radio history card press *Last minute*, then *Last 5 minutes*, then
-   *All kept*. The chart and the table narrow and widen to match.
+   *All kept*. The chart narrows and widens to match, and *Show the newest* under it opens
+   the readings in a table.
 3. Or ask the API for a stretch of time directly. Swap the times for ones from the
    last few minutes, since the tree only holds what arrived after the simulator
    started and an older range comes back as an empty list:
@@ -589,9 +625,11 @@ The live updates use a SignalR hub at `/hubs/stream`. The OpenAPI document is at
   query only, since nothing needs a delete. Prim uses the built-in `PriorityQueue`.
 - **Part 3 things I left rough.** The radio history has no cap, so memory grows with
   the readings, and the backfill the simulator posts at the start never reaches it, only
-  live readings do. A link stays in the mesh until the gateway restarts, with whichever end
-  reported it last setting its signal. Prim weighs signal only. The drawing puts devices
-  on a fixed circle, which gets crowded past about 40 devices. A device's hop count is
+  live readings do. A link stays in the mesh until the gateway restarts, and each report
+  from either end moves its signal a fifth of the way to the new reading, so the signal
+  is a running average. Prim weighs signal only. The thick links follow a steadier copy of
+  the tree, so after the real tree changes the drawing takes about nine seconds to catch
+  up, and it gets crowded past about 40 devices. A device's hop count is
   the last packet's, so it can differ from the length of the cheapest route on the
   page (one soil sensor says 3 and the route shows 4). A quiet device is judged by the
   gateway's 15 second limit, and a MAC typed in the route box has to match exactly.
