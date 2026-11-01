@@ -8,8 +8,7 @@
 namespace SmartX.Api.Collections
 {
     //keeps readings in a binary search tree that rebalances itself after every insert, so it never leans into a list
-    //insert is O(log n) and a range query is O(log n + k) for k results, the height stays under about 1.44 log2(n)
-    //it is not thread safe on its own, whoever owns the tree takes the lock
+    //insert is O(log n) and a range query is O(log n + k) for k results    //it is not thread safe on its own, whoever owns the tree takes the lock
     public class AvlTree<TKey, TValue> where TKey : IComparable<TKey>
     {
         //one key in the tree, readings with the same key share the node

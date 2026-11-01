@@ -551,7 +551,7 @@ else if (_mesh != null)
     // The middle of the drawing never moves, so a position that was worked out once stays right.
     private const double Centre = 700;
 
-    // Every ring is the same distance from the one inside it, however many rings there are, so a deeper tree adds rings on the outside and nothing else changes size.
+    // Rings are evenly spaced, so a deeper tree just adds rings on the outside.
     private const double InnerRadius = 64;
     private const double RingStep = 48;
     private const double CanvasMargin = 60;
@@ -561,7 +561,7 @@ else if (_mesh != null)
     // The drawing leaves room for at least this many rings, the last one being the ring for devices with no route.
     private const int MinRings = 8;
 
-    // The most rings the drawing has needed this visit. It only grows, so the scale does not change back and forth.
+    // The most rings needed this visit. It only grows, so the scale does not flip back and forth.
     private int _ringCapacity = MinRings;
 
     private static readonly int[] ZoomSteps = { 1, 2, 3, 4 };
@@ -594,11 +594,11 @@ else if (_mesh != null)
 
     private readonly List<(double Radius, string Label)> _rings = new();
 
-    // The last layout that was drawn, kept so the picture does not move with every wobble in the signal.
+    // The last layout drawn, kept so the picture does not move when the signal wobbles.
     private readonly Dictionary<string, (double X, double Y)> _heldSpots = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<(double Radius, string Label)> _heldRings = new();
 
-    // The tree that is drawn and traced, a steadier copy of the one the api sends. A device only changes parent here once the same new parent has come back a few times in a row, so the links never disagree with where the devices are drawn.
+    // The tree that is drawn and traced, a steadier copy of the api's. A device only changes parent here after a few refreshes in a row.
     private readonly Dictionary<string, string> _drawParents = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (string Candidate, int Count)> _parentVotes = new(StringComparer.OrdinalIgnoreCase);
 

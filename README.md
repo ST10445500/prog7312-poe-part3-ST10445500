@@ -158,10 +158,9 @@ The URLs are the same as the Visual Studio ones above.
 ### What the simulator does
 
 On its own the simulator registers twenty more devices on top of the nine the gateway
-starts with, so there are 28 devices reporting. It backfills a few hours of history
-per sensor and then keeps streaming about a reading a second. I did not want anyone
-to need a flag to see something happen, so each device has its own behaviour and
-you should see all of these within about a minute:
+starts with, so there are 29 devices reporting. It backfills a few hours of history
+per sensor and then keeps streaming about a reading a second. No flags are needed,
+and you should see all of these within about a minute:
 
 - soil sensors that dry out and raise a low moisture alert
 - power meters that surge past 600W
@@ -220,13 +219,10 @@ device and back out. Names are only written for the gateway, the picked device a
 devices it can hear, so the drawing stays readable. A link weaker than -80 dBm is drawn
 amber, and pointing at a device, in the drawing or the list, highlights it and its links.
 Every node can also be reached with the keyboard.
-The page reloads when the gateway pushes a change, with a slow poll as the fallback, but
-no more than once every three seconds. The thick links and the route follow a steadier
-copy of the tree the api sends, in which a device only changes parent once the same new
-parent has come back three refreshes in a row, so the links always match where the
-devices are drawn. A device that goes quiet or comes back is the only one that moves.
-The colours and signals still update every time. The *Pause* button holds the picture
-still so it can be read, and *Resume* catches it up.
+The page reloads when the gateway pushes a change, with a slow poll as the fallback. To
+stop the drawing jumping, a device only changes parent once the same new parent has come
+back three refreshes in a row, while colours and signals update every time. *Pause*
+holds the picture still so it can be read, and *Resume* catches it up.
 
 **The side panel.** On a wide screen it sits to the right of the drawing and stays in
 view. At the top is the picked device, with its status, hops, the device it hands its
@@ -302,7 +298,7 @@ and cut off, and `GET /api/topology/mst` returns the tree.
    started and an older range comes back as an empty list:
 
 ```bash
-curl -k "https://localhost:7002/api/topology/AA:BB:CC:DD:EE:05/history?from=2026-11-01T15:28:00Z&to=2026-11-01T15:33:00Z"
+curl -k "https://localhost:7002/api/topology/AA:BB:CC:DD:EE:05/history?from=$(date -u -d '-5 min' +%FT%TZ)&to=$(date -u +%FT%TZ)"
 ```
 
 A MAC the mesh has never heard gives 404 and a start after the end gives 400.
@@ -332,7 +328,7 @@ treats the client and the backend API as separate layers. Keeping them apart mea
 had to deal with CORS properly: the API allows the client's origin, and the client's
 `HttpClient` points at the API's base URL from
 `SmartX.Web/wwwroot/appsettings.json`. That is the same problem a real deployment
-would have, so it felt like the more honest way to build it.
+would have.
 
 ### How a reading travels in Part 3
 
@@ -397,8 +393,7 @@ question is whether a device is reached at all.
 **Prim's minimum spanning tree** (`MeshGraph.FindSpanningTree`). Grows the tree out from
 the gateway, always taking the cheapest link out of it. A link costs its signal strength
 without the minus sign, so a weaker link costs more and the tree prefers strong ones.
-The frontier is the built-in `PriorityQueue`, written around rather than rebuilt, the same
-call as for the alert queue in Part 2. O(edges log nodes). Ties go to the lower MAC so
+The frontier is the built-in `PriorityQueue`, as with the alert queue in Part 2. O(edges log nodes). Ties go to the lower MAC so
 equal weights give the same tree every time. Only the signal is weighed for now, packet
 loss and duty cycle are ignored.
 
@@ -413,12 +408,11 @@ the mean of 10 runs after a warm-up, and the driver is not in the repo.
 | 100,000 | last 60 seconds | 60 | 0.0011 ms | 0.1788 ms |
 | 100,000 | middle 10% | 10,001 | 0.2460 ms | 0.1831 ms |
 
-The tree wins when the window is small next to the data, which is what the *Last minute*
-button asks for: about 160 times faster at 100,000 readings. At 1,000 readings there is
-no real difference. When the window holds a tenth of everything the tree is slightly
-slower, because both are then walking k results and the tree adds recursion on top. At
-100,000 readings the tree is 17 levels high where the AVL limit is about 24, so the
-rebalancing is working.
+The tree wins when the window is small next to the data, as with *Last minute*: about
+160 times faster at 100,000 readings. At 1,000 readings there is no real difference.
+When the window holds a tenth of everything the tree is slightly slower, because both
+walk k results and the tree adds recursion. At 100,000 readings the tree is 17 levels
+high against an AVL limit of about 24.
 
 | Devices | Links | Prim | Breadth first |
 |---|---|---|---|
@@ -449,14 +443,14 @@ simulator's layout.
 | **Backend** | ASP.NET Core Web API (`.NET 10`) | The brief mandates a .NET 10 backend. I used controllers rather than minimal APIs because grouping the routes by controller kept each file small enough to read. |
 | **Frontend** | Blazor WebAssembly (`.NET 10`) | The frontend was free choice. I picked Blazor so the whole solution stays C# and the client can share model classes with the API instead of me redefining them in another language. |
 | **Live updates** | SignalR | Polling alone made the page feel a second behind. The gateway now tells the page when something changed, and polling stays as the fallback. |
-| **Shared models** | A class library both projects reference | I used this so a change to a model is a compile error on both sides straight away, rather than something I only find at runtime. |
+| **Shared models** | A class library both projects reference | A change to a model is a compile error on both sides straight away, not something found at runtime. |
 | **Styling** | Bootstrap 5.3.3, vendored into `wwwroot` | I used Bootstrap for the grid and form styling, and copied it into the project instead of using a CDN so the dashboard still renders with no internet. |
 | **Storage** | In-memory, with hand-written and built-in collections | The rubric wants specific structures, and telemetry is a stream where only the recent window matters, so memory fits the problem better than a database would. |
 | **Priority queue** | The built-in `PriorityQueue`, inside my own locked class | I kept the built-in one and spent the effort on the parts around it: equal alerts leaving in the order they arrived, and sharing it safely between requests and the processor. |
 | **Encryption** | `System.Security.Cryptography` AES-256 | The file upload criterion asks for full encryption. I streamed it in 64KB chunks so a large upload is never held in memory all at once. |
 | **Device simulation** | Console app posting over HTTP | I needed a fleet to look at without owning any hardware, and posting through the real endpoint means the simulator is not a special case in the API. |
-| **Testing** | xUnit | I used xUnit because it is the standard .NET test framework and it is what the test project template gives you. |
-| **Containerisation** | Docker and Docker Compose | I used Compose so the gateway, dashboard and simulator start together with one command, and so a marker does not have to trust a certificate or open three terminals. |
+| **Testing** | xUnit | The standard .NET test framework, and what the test project template gives you. |
+| **Containerisation** | Docker and Docker Compose | Gateway, dashboard and simulator start together with one command, with no certificate to trust and no three terminals. |
 
 ---
 
@@ -623,16 +617,16 @@ The live updates use a SignalR hub at `/hubs/stream`. The OpenAPI document is at
   is about the ingestion pipeline and the data structures rather than persistence.
 - **The AVL tree is written by hand, Prim's queue is not.** The tree has insert and range
   query only, since nothing needs a delete. Prim uses the built-in `PriorityQueue`.
-- **Part 3 things I left rough.** The radio history has no cap, so memory grows with
-  the readings, and the backfill the simulator posts at the start never reaches it, only
-  live readings do. A link stays in the mesh until the gateway restarts, and each report
-  from either end moves its signal a fifth of the way to the new reading, so the signal
-  is a running average. Prim weighs signal only. The thick links follow a steadier copy of
-  the tree, so after the real tree changes the drawing takes about nine seconds to catch
-  up, and it gets crowded past about 40 devices. A device's hop count is
-  the last packet's, so it can differ from the length of the cheapest route on the
-  page (one soil sensor says 3 and the route shows 4). A quiet device is judged by the
-  gateway's 15 second limit, and a MAC typed in the route box has to match exactly.
+- **Part 3 things I left rough.**
+  - The radio history has no cap, so memory grows with the readings. The simulator's
+    backfill never reaches it, only live readings do.
+  - A link stays in the mesh until the gateway restarts, and its signal is a running
+    average of the reports from either end. Prim weighs signal only.
+  - The drawing takes about nine seconds to catch up after the real tree changes, and
+    it gets crowded past about 40 devices.
+  - A device's hop count is the last packet's, so it can differ from the length of the
+    cheapest route on the page (one soil sensor says 3 and the route shows 4).
+  - A MAC typed in the route box has to match exactly.
 - **I could not run Docker on the machine I wrote Part 3 on.** The compose file and the
   three Dockerfiles are unchanged from Part 2, and I checked every page with
   `dotnet run`, but `docker compose up --build` is the one thing I have not seen work
