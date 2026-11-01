@@ -138,6 +138,87 @@ else if (_mesh != null)
         </div>
     </div>
 
+    @if (ChosenDevice() is { } chosen)
+    {
+        <div class="card mb-4">
+            <div class="card-body">
+                <h2 class="h5">Radio history for <span class="font-monospace">@chosen.MacAddress</span></h2>
+
+                @if (chosen.IsGateway)
+                {
+                    <div class="text-muted">The gateway does not send readings, pick a device.</div>
+                }
+                else
+                {
+                    <div class="d-flex flex-wrap gap-2 mb-2">
+                        <div class="btn-group btn-group-sm" role="group" aria-label="History range">
+                            @foreach (var (minutes, label) in HistoryRanges)
+                            {
+                                <button type="button" class="btn @(_historyMinutes == minutes ? "btn-primary" : "btn-outline-primary")"
+                                        @onclick="() => ChooseRange(minutes)">@label</button>
+                            }
+                        </div>
+
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Radio number">
+                            @foreach (var metric in Metrics)
+                            {
+                                <button type="button" class="btn @(_metric == metric ? "btn-primary" : "btn-outline-primary")"
+                                        @onclick="() => ChooseMetric(metric)">@metric</button>
+                            }
+                        </div>
+                    </div>
+
+                    @if (_historyFailed)
+                    {
+                        <div class="alert alert-danger mb-0">Could not load the history for this device.</div>
+                    }
+                    else if (_history == null)
+                    {
+                        <div class="text-muted">Loading...</div>
+                    }
+                    else if (_history.Count == 0)
+                    {
+                        <div class="text-muted">
+                            @(_historyMinutes == 0 ? "No readings kept for this device yet." : "No readings in this range.")
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mb-2 text-primary">
+                            <TimelineChart Points="_chart" />
+                        </div>
+                        <div class="small text-muted mb-2">Newest @Math.Min(_history.Count, HistoryRows) of @_history.Count in this range.</div>
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Recorded</th>
+                                        <th>Signal</th>
+                                        <th>Hops</th>
+                                        <th>Duty cycle</th>
+                                        <th>Packet loss</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var point in _history.AsEnumerable().Reverse().Take(HistoryRows))
+                                    {
+                                        <tr>
+                                            <td class="text-muted small">@point.RecordedAt.ToLocalTime().ToString("HH:mm:ss")</td>
+                                            <td>@(point.Rssi?.ToString() ?? "-") dBm</td>
+                                            <td>@(point.HopCount?.ToString() ?? "-")</td>
+                                            <td>@(point.DutyCycle?.ToString("0.#") ?? "-")%</td>
+                                            <td>@(point.PacketLoss?.ToString("0.#") ?? "-")%</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    }
+
     <div class="row g-3">
         <div class="col-12 col-lg-6">
             <h2 class="h5">Devices</h2>
@@ -221,6 +302,25 @@ else if (_mesh != null)
     private string _routeMac = string.Empty;
     private string? _routeMessage;
 
+    private const int HistoryRows = 15;
+
+    // Minutes back from now, where 0 means everything the tree kept.
+    private static readonly (int Minutes, string Label)[] HistoryRanges =
+    {
+        (1, "Last minute"),
+        (5, "Last 5 minutes"),
+        (0, "All kept")
+    };
+
+    private static readonly string[] Metrics = { "Signal", "Hops", "Duty cycle", "Packet loss" };
+
+    private List<TelemetryPoint>? _history;
+    private readonly List<HistoryPoint> _chart = new();
+    private bool _historyFailed;
+    private bool _historyLoading;
+    private int _historyMinutes = 5;
+    private string _metric = "Signal";
+
     private record RouteHop(string Name, string Mac, int? Rssi);
 
     //says whether the route being traced uses this link
@@ -236,17 +336,123 @@ else if (_mesh != null)
     }
 
     //traces the typed mac address
-    private void ShowRoute()
+    private async Task ShowRoute()
     {
         _routeMac = State.RouteSearch.Trim();
         UpdateRoute();
+
+        _history = null;
+        _historyFailed = false;
+        await LoadHistoryAsync();
     }
 
     //fills the box with the clicked device and traces it
-    private void SelectNode(string mac)
+    private async Task SelectNode(string mac)
     {
         State.RouteSearch = mac;
-        ShowRoute();
+        await ShowRoute();
+    }
+
+    //retrieves the device the route box points at, or null if it has not been seen
+    private TopologyNode? ChosenDevice()
+    {
+        return _mesh?.Nodes.FirstOrDefault(n => string.Equals(n.MacAddress, _routeMac, StringComparison.OrdinalIgnoreCase));
+    }
+
+    //changes how far back the history card reaches
+    private async Task ChooseRange(int minutes)
+    {
+        _historyMinutes = minutes;
+        _history = null;
+        _historyFailed = false;
+        await LoadHistoryAsync();
+    }
+
+    //changes which radio number the chart draws
+    private void ChooseMetric(string metric)
+    {
+        _metric = metric;
+        RebuildChart();
+    }
+
+    //asks the api for the chosen device radio readings over the chosen range
+    private async Task LoadHistoryAsync()
+    {
+        var device = ChosenDevice();
+
+        if (device == null || device.IsGateway)
+        {
+            _history = null;
+            _historyFailed = false;
+            RebuildChart();
+            return;
+        }
+
+        // The refresh also calls this, one request at a time is enough.
+        if (_historyLoading)
+        {
+            return;
+        }
+
+        _historyLoading = true;
+
+        try
+        {
+            var url = $"api/topology/{Uri.EscapeDataString(device.MacAddress)}/history";
+
+            if (_historyMinutes > 0)
+            {
+                var from = DateTime.UtcNow.AddMinutes(-_historyMinutes);
+
+                url += $"?from={Uri.EscapeDataString(from.ToString("o"))}";
+            }
+
+            _history = await Http.GetFromJsonAsync<List<TelemetryPoint>>(url, ApiJsonOptions.Default);
+            _historyFailed = false;
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            // The mesh has heard of the device but kept no readings from it, which is just an empty list.
+            _history = new List<TelemetryPoint>();
+            _historyFailed = false;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException)
+        {
+            _historyFailed = true;
+        }
+        finally
+        {
+            _historyLoading = false;
+        }
+
+        RebuildChart();
+    }
+
+    //turns the readings into the shape the timeline chart draws, leaving out any the device did not give a number for
+    private void RebuildChart()
+    {
+        _chart.Clear();
+
+        if (_history == null)
+        {
+            return;
+        }
+
+        foreach (var point in _history)
+        {
+            var reading = _metric switch
+            {
+                "Hops" => point.HopCount == null ? null : $"{point.HopCount} hops",
+                "Duty cycle" => point.DutyCycle == null ? null : $"{point.DutyCycle:0.#}%",
+                "Packet loss" => point.PacketLoss == null ? null : $"{point.PacketLoss:0.#}%",
+                _ => point.Rssi == null ? null : $"{point.Rssi} dBm"
+            };
+
+            if (reading != null)
+            {
+                _chart.Add(new HistoryPoint { RecordedAt = point.RecordedAt, Reading = reading, Rssi = point.Rssi });
+            }
+        }
     }
 
     //works out the hop path for the chosen device from the tree, or says why there is none
@@ -497,6 +703,7 @@ else if (_mesh != null)
             _reach = await Http.GetFromJsonAsync<MeshReach>("api/topology/reach", ApiJsonOptions.Default);
             BuildLayout();
             UpdateRoute();
+            await LoadHistoryAsync();
             _loadFailed = false;
             _lastUpdated = DateTime.UtcNow;
         }
