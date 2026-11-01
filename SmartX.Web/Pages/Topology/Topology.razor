@@ -618,7 +618,7 @@ else if (_mesh != null)
             return "mesh-node-quiet";
         }
 
-        if (_tree != null && _tree.Unreached.Contains(node.MacAddress, StringComparer.OrdinalIgnoreCase))
+        if (IsCutOff(node))
         {
             return "mesh-node-cut";
         }
@@ -626,15 +626,26 @@ else if (_mesh != null)
         return "mesh-node-up";
     }
 
-    //says whether a device is the gateway, has gone quiet, or is reporting
-    private static string DescribeStatus(TopologyNode node)
+    //says whether a live device has no path left to the gateway
+    private bool IsCutOff(TopologyNode node)
+    {
+        return _tree != null && _tree.Unreached.Contains(node.MacAddress, StringComparer.OrdinalIgnoreCase);
+    }
+
+    //says whether a device is the gateway, has gone quiet, is cut off from the gateway, or is reporting
+    private string DescribeStatus(TopologyNode node)
     {
         if (node.IsGateway)
         {
             return "Gateway";
         }
 
-        return node.Disconnected ? "Quiet" : "Up";
+        if (node.Disconnected)
+        {
+            return "Quiet";
+        }
+
+        return IsCutOff(node) ? "Cut off" : "Up";
     }
 
     protected override async Task OnInitializedAsync()

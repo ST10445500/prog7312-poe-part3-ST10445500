@@ -203,6 +203,46 @@ namespace SmartX.Tests
             Assert.Equal(devices, graph.GetLinks().Count);
         }
 
+        [Fact]
+        public void FindReachable_WalkWhileLinksAreBeingAdded_NeverThrowsAndEndsWithEveryDevice()
+        {
+            // Arrange
+            var graph = new MeshGraph();
+            const int devices = 400;
+            var writing = true;
+
+            string MacOf(int index) => $"AA:BB:CC:00:{index / 256:X2}:{index % 256:X2}";
+
+            graph.UpdateNode(MacOf(0), null);
+
+            // Act
+            var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+            {
+                while (Volatile.Read(ref writing))
+                {
+                    graph.FindReachable(MacOf(0), []);
+                    graph.FindSpanningTree(MacOf(0), []);
+                    graph.GetLinks();
+                }
+            })).ToArray();
+
+            Parallel.For(1, devices, index =>
+            {
+                graph.UpdateNode(MacOf(index), Hears(MacOf(index - 1), -60));
+            });
+
+            Volatile.Write(ref writing, false);
+            Task.WaitAll(readers);
+
+            // Assert
+            // A line, so once the writers are done every device is reachable and sits in the tree.
+            var reach = graph.FindReachable(MacOf(0), []);
+            var tree = graph.FindSpanningTree(MacOf(0), []);
+            Assert.Equal(devices, reach.Reachable.Count);
+            Assert.Equal(devices - 1, tree.Edges.Count);
+            Assert.Empty(tree.Unreached);
+        }
+
         private const string Gateway = MeshGateway.MacAddress;
 
         // Builds a mesh from pairs of macs, each pair one link.
