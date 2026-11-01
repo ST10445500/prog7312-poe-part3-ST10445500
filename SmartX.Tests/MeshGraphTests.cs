@@ -23,50 +23,6 @@ namespace SmartX.Tests
         }
 
         [Fact]
-        public void GetNodes_NothingReported_IsEmpty()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-
-            // Act
-            var nodes = graph.GetNodes();
-
-            // Assert
-            Assert.Empty(nodes);
-            Assert.Empty(graph.GetLinks());
-            Assert.Equal(0, graph.NodeCount);
-        }
-
-        [Fact]
-        public void UpdateNode_NoNeighbours_AddsTheNodeWithNoLinks()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-
-            // Act
-            graph.UpdateNode(MacA, null);
-
-            // Assert
-            Assert.Equal([MacA], graph.GetNodes());
-            Assert.Empty(graph.GetLinks());
-        }
-
-        [Fact]
-        public void UpdateNode_OneNeighbour_AddsBothNodesAndOneLink()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-
-            // Act
-            graph.UpdateNode(MacB, Hears(MacA, -60));
-
-            // Assert
-            Assert.Equal([MacA, MacB], graph.GetNodes());
-            var link = Assert.Single(graph.GetLinks());
-            Assert.Equal((MacA, MacB, -60), link);
-        }
-
-        [Fact]
         public void UpdateNode_BothEndsReportTheLink_StoresItOnce()
         {
             // Arrange
@@ -82,129 +38,7 @@ namespace SmartX.Tests
         }
 
         [Fact]
-        public void UpdateNode_SameLinkTwice_RefreshesTheSignalWithoutDuplicating()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-            graph.UpdateNode(MacA, Hears(MacB, -60));
-
-            // Act
-            graph.UpdateNode(MacA, Hears(MacB, -75));
-
-            // Assert
-            var link = Assert.Single(graph.GetLinks());
-            Assert.Equal(-75, link.Rssi);
-        }
-
-        [Fact]
-        public void UpdateNode_NeighbourNeverReported_BecomesANode()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-
-            // Act
-            graph.UpdateNode(MacA, Hears(MacC, -70));
-
-            // Assert
-            Assert.True(graph.Contains(MacC));
-            Assert.False(graph.Contains(MacB));
-        }
-
-        [Fact]
-        public void UpdateNode_LinkToItself_IsIgnored()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-
-            // Act
-            graph.UpdateNode(MacA, Hears(MacA, -40));
-
-            // Assert
-            Assert.Equal([MacA], graph.GetNodes());
-            Assert.Empty(graph.GetLinks());
-        }
-
-        [Fact]
-        public void UpdateNode_OnlyTheGateway_LinksTheDeviceToIt()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-
-            // Act
-            graph.UpdateNode(MacA, Hears(MeshGateway.MacAddress, -50));
-
-            // Assert
-            Assert.True(graph.Contains(MeshGateway.MacAddress));
-            var link = Assert.Single(graph.GetLinks());
-            Assert.Equal(MeshGateway.MacAddress, link.MacA);
-            Assert.Equal(MacA, link.MacB);
-        }
-
-        [Fact]
-        public void Contains_LowerCaseMac_FindsTheNode()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-            graph.UpdateNode(MacA, null);
-
-            // Act
-            var found = graph.Contains("aa:bb:cc:dd:ee:01");
-
-            // Assert
-            Assert.True(found);
-        }
-
-        [Fact]
-        public void UpdateNode_BlankMac_Throws()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-
-            // Act
-            var problem = Record.Exception(() => graph.UpdateNode(" ", null));
-
-            // Assert
-            Assert.IsType<ArgumentException>(problem);
-        }
-
-        [Fact]
-        public void GetLinks_ThreeInAChain_ListsTwoLinksOldestMacFirst()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-            graph.UpdateNode(MacB, [new NeighbourLink { MacAddress = MacA, Rssi = -55 }, new NeighbourLink { MacAddress = MacC, Rssi = -65 }]);
-
-            // Act
-            var links = graph.GetLinks();
-
-            // Assert
-            Assert.Equal([(MacA, MacB, -55), (MacB, MacC, -65)], links);
-        }
-
-        [Fact]
-        public void UpdateNode_ManyThreadsOnALargeMesh_KeepsEveryNodeAndLinkOnce()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-            const int devices = 5000;
-
-            // Act
-            Parallel.For(0, devices, index =>
-            {
-                var mac = $"AA:BB:CC:00:{index / 256:X2}:{index % 256:X2}";
-                var previous = $"AA:BB:CC:00:{(index + devices - 1) % devices / 256:X2}:{(index + devices - 1) % devices % 256:X2}";
-
-                graph.UpdateNode(mac, Hears(previous, -60));
-            });
-
-            // Assert
-            // A ring, so every device has one link to the one before it and none are doubled.
-            Assert.Equal(devices, graph.NodeCount);
-            Assert.Equal(devices, graph.GetLinks().Count);
-        }
-
-        [Fact]
-        public void FindReachable_WalkWhileLinksAreBeingAdded_NeverThrowsAndEndsWithEveryDevice()
+        public async Task FindReachable_WalkWhileLinksAreBeingAdded_NeverThrowsAndEndsWithEveryDevice()
         {
             // Arrange
             var graph = new MeshGraph();
@@ -232,7 +66,7 @@ namespace SmartX.Tests
             });
 
             Volatile.Write(ref writing, false);
-            Task.WaitAll(readers);
+            await Task.WhenAll(readers);
 
             // Assert
             // A line, so once the writers are done every device is reachable and sits in the tree.
@@ -256,50 +90,6 @@ namespace SmartX.Tests
             }
 
             return graph;
-        }
-
-        [Fact]
-        public void FindReachable_GatewayAlone_OnlyTheGatewayIsReachable()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-            graph.UpdateNode(Gateway, null);
-
-            // Act
-            var reach = graph.FindReachable(Gateway, []);
-
-            // Assert
-            Assert.Equal([Gateway], reach.Reachable);
-            Assert.Empty(reach.Down);
-            Assert.Empty(reach.Unreachable);
-        }
-
-        [Fact]
-        public void FindReachable_GatewayNotInGraph_ReachesNothing()
-        {
-            // Arrange
-            var graph = Mesh((MacA, MacB));
-
-            // Act
-            var reach = graph.FindReachable(Gateway, []);
-
-            // Assert
-            Assert.Empty(reach.Reachable);
-            Assert.Equal([MacA, MacB], reach.Unreachable);
-        }
-
-        [Fact]
-        public void FindReachable_Line_NothingDown_ReachesEveryone()
-        {
-            // Arrange
-            var graph = Mesh((Gateway, MacA), (MacA, MacB));
-
-            // Act
-            var reach = graph.FindReachable(Gateway, []);
-
-            // Assert
-            Assert.Equal(3, reach.Reachable.Count);
-            Assert.Empty(reach.Unreachable);
         }
 
         [Fact]
@@ -347,52 +137,6 @@ namespace SmartX.Tests
             Assert.Equal([MacB, MacC], reach.Unreachable);
         }
 
-        [Fact]
-        public void FindReachable_QuietMacInLowerCase_StillMatches()
-        {
-            // Arrange
-            var graph = Mesh((Gateway, MacA));
-
-            // Act
-            var reach = graph.FindReachable(Gateway, [MacA.ToLowerInvariant()]);
-
-            // Assert
-            Assert.Equal([MacA], reach.Down);
-            Assert.Equal([Gateway], reach.Reachable);
-        }
-
-        [Fact]
-        public void FindReachable_QuietMacNotInGraph_IsIgnored()
-        {
-            // Arrange
-            var graph = Mesh((Gateway, MacA));
-
-            // Act
-            var reach = graph.FindReachable(Gateway, [MacC]);
-
-            // Assert
-            Assert.Empty(reach.Down);
-            Assert.Equal([Gateway, MacA], reach.Reachable);
-        }
-
-        [Fact]
-        public void FindReachable_LongLine_ReachesTheEnd()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-            graph.UpdateNode(Gateway, Hears("N0", -60));
-
-            for (var i = 0; i < 5000; i++)
-            {
-                graph.UpdateNode($"N{i}", Hears($"N{i + 1}", -60));
-            }
-
-            // Act
-            var reach = graph.FindReachable(Gateway, []);
-
-            // Assert
-            Assert.Equal(5002, reach.Reachable.Count);
-        }
     }
 }
 

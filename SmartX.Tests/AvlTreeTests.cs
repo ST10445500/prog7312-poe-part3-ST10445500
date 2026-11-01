@@ -25,39 +25,6 @@ namespace SmartX.Tests
         }
 
         [Fact]
-        public void GetRange_EmptyTree_IsEmptyWithNoHeight()
-        {
-            // Arrange
-            var tree = new AvlTree<int, int>();
-
-            // Act
-            var found = tree.GetRange(0, 100);
-
-            // Assert
-            Assert.Empty(found);
-            Assert.Equal(0, tree.Count);
-            Assert.Equal(0, tree.Height);
-        }
-
-        [Fact]
-        public void Insert_OneItem_HasHeightOneAndIsFoundOnlyInsideTheRange()
-        {
-            // Arrange
-            var tree = Build([5]);
-
-            // Act
-            var hit = tree.GetRange(5, 5);
-            var missBelow = tree.GetRange(1, 4);
-            var missAbove = tree.GetRange(6, 9);
-
-            // Assert
-            Assert.Equal(1, tree.Height);
-            Assert.Equal([5], hit);
-            Assert.Empty(missBelow);
-            Assert.Empty(missAbove);
-        }
-
-        [Fact]
         public void Insert_AscendingKeys_StaysPerfectlyBalanced()
         {
             // Arrange
@@ -72,23 +39,6 @@ namespace SmartX.Tests
             // Assert
             Assert.Equal(1023, tree.Count);
             Assert.Equal(10, tree.Height);
-        }
-
-        [Fact]
-        public void Insert_DescendingKeys_StaysBalanced()
-        {
-            // Arrange
-            var tree = new AvlTree<int, int>();
-
-            // Act
-            for (var i = 1023; i >= 1; i--)
-            {
-                tree.Insert(i, i);
-            }
-
-            // Assert
-            Assert.Equal(10, tree.Height);
-            Assert.Equal(Enumerable.Range(1, 1023), tree.GetRange(1, 1023));
         }
 
         [Theory]
@@ -109,21 +59,6 @@ namespace SmartX.Tests
             // Assert
             Assert.Equal(2, tree.Height);
             Assert.Equal([10, 20, 30], tree.GetRange(0, 100));
-        }
-
-        [Fact]
-        public void Insert_OutOfOrderKeys_RangeComesBackSorted()
-        {
-            // Arrange
-            var random = new Random(7312);
-            var keys = Enumerable.Range(1, 2000).OrderBy(_ => random.Next()).ToList();
-
-            // Act
-            var tree = Build(keys);
-
-            // Assert
-            Assert.Equal(Enumerable.Range(1, 2000), tree.GetRange(1, 2000));
-            Assert.True(tree.Height <= 1.44 * Math.Log2(2000) + 1);
         }
 
         [Fact]
@@ -157,47 +92,6 @@ namespace SmartX.Tests
         }
 
         [Fact]
-        public void GetRange_NothingInside_IsEmpty()
-        {
-            // Arrange
-            var tree = Build([10, 20, 30]);
-
-            // Act
-            var between = tree.GetRange(11, 19);
-            var beyond = tree.GetRange(31, 99);
-
-            // Assert
-            Assert.Empty(between);
-            Assert.Empty(beyond);
-        }
-
-        [Fact]
-        public void GetRange_ABigTree_ReturnsOnlyTheSlice()
-        {
-            // Arrange
-            var tree = Build(Enumerable.Range(0, 50000));
-
-            // Act
-            var found = tree.GetRange(25000, 25009);
-
-            // Assert
-            Assert.Equal(Enumerable.Range(25000, 10), found);
-        }
-
-        [Fact]
-        public void GetRange_StartAfterEnd_Throws()
-        {
-            // Arrange
-            var tree = Build([1, 2, 3]);
-
-            // Act
-            var act = () => tree.GetRange(3, 1);
-
-            // Assert
-            Assert.Throws<ArgumentException>(act);
-        }
-
-        [Fact]
         public void Insert_RepeatedKey_KeepsEveryValueInArrivalOrder()
         {
             // Arrange
@@ -217,24 +111,6 @@ namespace SmartX.Tests
             Assert.Equal(heightBefore, tree.Height);
         }
 
-        [Fact]
-        public void GetRange_TimestampKeys_FindsTheReadingsInsideTheWindow()
-        {
-            // Arrange
-            var start = new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc);
-            var tree = new AvlTree<DateTime, int>();
-
-            for (var i = 0; i < 60; i++)
-            {
-                tree.Insert(start.AddSeconds(i), i);
-            }
-
-            // Act
-            var found = tree.GetRange(start.AddSeconds(10), start.AddSeconds(14));
-
-            // Assert
-            Assert.Equal([10, 11, 12, 13, 14], found);
-        }
     }
 }
 

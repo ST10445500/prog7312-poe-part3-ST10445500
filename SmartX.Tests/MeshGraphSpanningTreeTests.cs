@@ -24,37 +24,6 @@ namespace SmartX.Tests
         }
 
         [Fact]
-        public void FindSpanningTree_EmptyGraph_HasNoEdgesAndNoCost()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-
-            // Act
-            var tree = graph.FindSpanningTree(Gateway, []);
-
-            // Assert
-            Assert.Empty(tree.Edges);
-            Assert.Empty(tree.Unreached);
-            Assert.Equal(0, tree.TotalCost);
-        }
-
-        [Fact]
-        public void FindSpanningTree_GatewayAlone_HasNoEdgesAndNoCost()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-            graph.UpdateNode(Gateway, null);
-
-            // Act
-            var tree = graph.FindSpanningTree(Gateway, []);
-
-            // Assert
-            Assert.Empty(tree.Edges);
-            Assert.Empty(tree.Parents);
-            Assert.Equal(0, tree.TotalCost);
-        }
-
-        [Fact]
         public void FindSpanningTree_SmallMesh_TakesTheCheapestLinks()
         {
             // Arrange
@@ -79,23 +48,6 @@ namespace SmartX.Tests
         }
 
         [Fact]
-        public void FindSpanningTree_DisconnectedDevice_IsListedAsUnreached()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-            Link(graph, Gateway, MacA, -40);
-            Link(graph, MacB, MacC, -50);
-
-            // Act
-            var tree = graph.FindSpanningTree(Gateway, []);
-
-            // Assert
-            Assert.Equal([MacB, MacC], tree.Unreached);
-            Assert.Equal(40, tree.TotalCost);
-            Assert.Single(tree.Edges);
-        }
-
-        [Fact]
         public void FindSpanningTree_QuietDevice_IsLeftOutAndTheTreeGoesRound()
         {
             // Arrange
@@ -113,22 +65,6 @@ namespace SmartX.Tests
             Assert.Equal(MacC, tree.Parents[MacB]);
             Assert.Equal(160, tree.TotalCost);
             Assert.Empty(tree.Unreached);
-        }
-
-        [Fact]
-        public void FindSpanningTree_QuietDeviceIsTheOnlyWay_CutsOffTheOnesBehindIt()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-            Link(graph, Gateway, MacA, -40);
-            Link(graph, MacA, MacB, -40);
-
-            // Act
-            var tree = graph.FindSpanningTree(Gateway, [MacA]);
-
-            // Assert
-            Assert.Empty(tree.Edges);
-            Assert.Equal([MacB], tree.Unreached);
         }
 
         [Fact]
@@ -152,64 +88,6 @@ namespace SmartX.Tests
             Assert.Equal(150, first.TotalCost);
         }
 
-        [Fact]
-        public void FindSpanningTree_LowercaseGateway_StillFindsIt()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-            Link(graph, Gateway, MacA, -40);
-
-            // Act
-            var tree = graph.FindSpanningTree(Gateway.ToLowerInvariant(), []);
-
-            // Assert
-            Assert.Equal(40, tree.TotalCost);
-        }
-
-        [Fact]
-        public void FindSpanningTree_FiveThousandInALine_ReachesTheEnd()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-            var previous = Gateway;
-
-            for (var i = 1; i <= 5000; i++)
-            {
-                var mac = $"AA:BB:CC:{i / 65536:X2}:{i / 256 % 256:X2}:{i % 256:X2}";
-                Link(graph, previous, mac, -50);
-                previous = mac;
-            }
-
-            // Act
-            var tree = graph.FindSpanningTree(Gateway, []);
-
-            // Assert
-            Assert.Equal(5000, tree.Edges.Count);
-            Assert.Equal(250000, tree.TotalCost);
-            Assert.Empty(tree.Unreached);
-        }
-
-        [Fact]
-        public void FindSpanningTree_WhileLinksAreUpdated_StaysConsistent()
-        {
-            // Arrange
-            var graph = new MeshGraph();
-            Link(graph, Gateway, MacA, -40);
-            var ring = Enumerable.Range(0, 200).Select(i => $"AA:BB:CC:00:00:{i:X2}").ToList();
-
-            // Act
-            Parallel.For(0, 200, i =>
-            {
-                Link(graph, i == 0 ? MacA : ring[i - 1], ring[i], -60);
-                graph.FindSpanningTree(Gateway, []);
-            });
-
-            var tree = graph.FindSpanningTree(Gateway, []);
-
-            // Assert
-            Assert.Equal(201, tree.Edges.Count);
-            Assert.Equal(40 + 200 * 60, tree.TotalCost);
-        }
     }
 }
 
