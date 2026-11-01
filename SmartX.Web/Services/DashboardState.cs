@@ -24,6 +24,7 @@ namespace SmartX.Web.Services
         private string _lastPostedSearch = string.Empty;
 
         private string _searchText = string.Empty;
+        private string _routeSearch = string.Empty;
         private SensorCategory? _category;
         private bool _alertsOnly;
         private int _historyMinutes;
@@ -118,6 +119,24 @@ namespace SmartX.Web.Services
             {
                 // The engine only misses one search, the page carries on.
                 Console.WriteLine($"Could not record the search: {ex.Message}");
+            }
+        }
+
+        //..............................................................................//
+
+        //retrieves or sets the mac address typed into the route box on the topology page
+        public string RouteSearch
+        {
+            get => _routeSearch;
+            set
+            {
+                if (_routeSearch == value)
+                {
+                    return;
+                }
+
+                _routeSearch = value;
+                OnChange?.Invoke();
             }
         }
 

@@ -584,6 +584,20 @@ body:has(.stream-page) .sx-container {
     stroke-dasharray: 4 3;
 }
 
+.mesh-link-route {
+    stroke: var(--sx-warn);
+    stroke-width: 4;
+}
+
+.mesh-node {
+    cursor: pointer;
+}
+
+.mesh-node-selected {
+    stroke: var(--sx-text);
+    stroke-width: 3;
+}
+
 .mesh-node-up {
     fill: var(--sx-accent);
 }
