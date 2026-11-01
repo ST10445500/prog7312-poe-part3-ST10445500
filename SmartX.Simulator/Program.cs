@@ -28,6 +28,11 @@ const double MaxIntervalSeconds = 2;
 const double DropAfterSeconds = 10;
 const double DropForSeconds = 40;
 
+// --kill takes a relay down like --drop does. Left alone, the run kills the relay the last device depends on, once.
+const double KillAfterSeconds = 10;
+const double AutoKillAfterSeconds = 60;
+const double KillForSeconds = 40;
+
 // What a valve says when --fault is used.
 const string FaultCode = "StuckValve";
 
@@ -53,6 +58,9 @@ var baseUrl = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordi
 var faultMac = ReadFlag("--fault");
 var dropMac = ReadFlag("--drop");
 var criticalMac = ReadFlag("--critical");
+var killMac = ReadFlag("--kill");
+string? killedMac = null;
+var killedUntil = DateTime.MinValue;
 var startedAt = DateTime.UtcNow;
 var gateway = new GatewayClient(baseUrl);
 
@@ -217,6 +225,7 @@ if (criticalMac != null)
 }
 
 streams.Add(SendScheduledBurstsAsync(stopping.Token));
+streams.Add(KillRelayAsync(stopping.Token));
 
 await Task.WhenAll(streams);
 
@@ -329,10 +338,48 @@ async Task SendScheduledBurstsAsync(CancellationToken token)
 
 //..............................................................................//
 
+//takes one relay off the air for a while, so the mesh has to find another way round
+async Task KillRelayAsync(CancellationToken token)
+{
+	var relay = killMac ?? MeshLayout.FindDeadEndRelay(reporting.Select(sensor => sensor.MacAddress).ToList());
+
+	var match = reporting.FirstOrDefault(sensor => string.Equals(sensor.MacAddress, relay, StringComparison.OrdinalIgnoreCase));
+
+	if (match == null)
+	{
+		Console.WriteLine($"--kill needs a device this simulator is reporting for, and {relay} is not one.");
+		return;
+	}
+
+	var target = match.MacAddress;
+	killedMac = target;
+
+	try
+	{
+		await Task.Delay(TimeSpan.FromSeconds(killMac != null ? KillAfterSeconds : AutoKillAfterSeconds), token);
+		Console.WriteLine($"  Relay {target} is off the air for {KillForSeconds} seconds.");
+		killedUntil = DateTime.UtcNow.AddSeconds(KillForSeconds);
+
+		await Task.Delay(TimeSpan.FromSeconds(KillForSeconds), token);
+		Console.WriteLine($"  Relay {target} is back.");
+	}
+	catch (OperationCanceledException)
+	{
+		return;
+	}
+}
+
+//..............................................................................//
+
 //checks whether this sensor is inside its quiet spell
 bool IsDropped(string macAddress)
 {
 	var running = (DateTime.UtcNow - startedAt).TotalSeconds;
+
+	if (string.Equals(macAddress, killedMac, StringComparison.OrdinalIgnoreCase) && DateTime.UtcNow < killedUntil)
+	{
+		return true;
+	}
 
 	// A device whose profile is to wander off does so with or without the flag.
 	if (generators[macAddress].IsQuietAt(running))

@@ -41,7 +41,10 @@ namespace SmartX.Simulator
                     neighbours.Add(macAddresses[index - 1]);
                 }
 
-                if (index >= CrossLinkSpan)
+                // The last device only hears the one before it, so that one is its only way out.
+                var deadEnd = index == macAddresses.Count - 1;
+
+                if (index >= CrossLinkSpan && !deadEnd)
                 {
                     neighbours.Add(macAddresses[index - CrossLinkSpan]);
                 }
@@ -50,6 +53,14 @@ namespace SmartX.Simulator
             }
 
             return layout;
+        }
+
+        //..............................................................................//
+
+        //retrieves the relay the last device depends on, or null when there are too few devices for one
+        public static string? FindDeadEndRelay(List<string> macAddresses)
+        {
+            return macAddresses.Count >= 2 ? macAddresses[^2] : null;
         }
     }
 }
