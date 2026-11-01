@@ -22,6 +22,9 @@ namespace SmartX.Api.Collections
             public int Rssi { get; set; }
         }
 
+        // How much of a new report is let into a link's signal. A radio reading wobbles by a few dB, and without this the cheapest tree swaps between near equal links on every report.
+        private const double SignalSmoothing = 0.2;
+
         private readonly Dictionary<string, List<Edge>> _nodes = new();
         private readonly object _lock = new();
 
@@ -42,7 +45,7 @@ namespace SmartX.Api.Collections
         //..............................................................................//
 
         //records a device and the neighbours it says it can hear, linking each pair both ways
-        //a neighbour the graph has not met becomes a node, and a link reported again only has its signal refreshed
+        //a neighbour the graph has not met becomes a node, and a link reported again only has its signal averaged in
         public void UpdateNode(string macAddress, List<NeighbourLink>? neighbours)
         {
             if (string.IsNullOrWhiteSpace(macAddress))
@@ -281,7 +284,7 @@ namespace SmartX.Api.Collections
 
         //..............................................................................//
 
-        //adds the edge from one node to another, or refreshes its signal if it is already there, called with the lock held
+        //adds the edge from one node to another, or moves its signal a fifth of the way to the new report if it is already there, called with the lock held
         private void SetEdge(string from, string to, int rssi)
         {
             var edges = _nodes[from];
@@ -291,7 +294,7 @@ namespace SmartX.Api.Collections
 
             if (existing != null)
             {
-                existing.Rssi = rssi;
+                existing.Rssi += (int)Math.Round((rssi - existing.Rssi) * SignalSmoothing);
                 return;
             }
 

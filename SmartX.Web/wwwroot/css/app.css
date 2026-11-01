@@ -565,37 +565,48 @@ body:has(.stream-page) .sx-container {
 }
 
 .mesh-svg {
+    display: block;
     width: 100%;
-    max-width: 560px;
     height: auto;
+    max-height: 40rem;
+    margin-inline: auto;
 }
 
 .mesh-link {
     stroke: var(--sx-border);
-    stroke-width: 1;
+    stroke-width: 2;
 }
 
 .mesh-link-tree {
     stroke: var(--sx-accent);
-    stroke-width: 2.5;
+    stroke-width: 5;
 }
 
 .mesh-link-quiet {
-    stroke-dasharray: 4 3;
+    stroke-dasharray: 8 6;
 }
 
 .mesh-link-route {
     stroke: var(--sx-warn);
-    stroke-width: 4;
+    stroke-width: 8;
 }
 
 .mesh-node {
     cursor: pointer;
+    /* Colours fade when a device changes state. Positions are not animated, because the links cannot follow them. */
+    transition: fill 0.3s ease;
+}
+
+/* A fixed width so the toolbar does not shift as the time changes. */
+.topo-clock {
+    display: inline-block;
+    min-width: 4.2rem;
+    font-variant-numeric: tabular-nums;
 }
 
 .mesh-node-selected {
     stroke: var(--sx-text);
-    stroke-width: 3;
+    stroke-width: 6;
 }
 
 .mesh-node-up {
@@ -612,6 +623,314 @@ body:has(.stream-page) .sx-container {
 
 .mesh-node-gateway {
     fill: var(--sx-text);
+}
+
+.mesh-ring {
+    fill: none;
+    stroke: var(--sx-border);
+    stroke-width: 2;
+    stroke-dasharray: 4 8;
+}
+
+.mesh-ring-label,
+.mesh-label {
+    font-size: 20px;
+    fill: var(--sx-text-muted);
+    pointer-events: none;
+    /* A light outline so a name stays readable where it crosses a link. */
+    paint-order: stroke;
+    stroke: var(--sx-bg);
+    stroke-width: 6px;
+}
+
+.mesh-label {
+    font-size: 24px;
+    fill: var(--sx-text);
+    font-weight: 600;
+    stroke: var(--sx-surface);
+}
+
+.mesh-node:hover,
+.mesh-node-hover {
+    stroke: var(--sx-text);
+    stroke-width: 4;
+}
+
+.mesh-node:focus {
+    outline: none;
+}
+
+.mesh-node:focus-visible {
+    stroke: var(--sx-accent);
+    stroke-width: 8;
+}
+
+/* The drawing is scaled down on a phone, so the names and ring labels are drawn larger and the nodes get a wider touch area. */
+@media (max-width: 575.98px) {
+    .mesh-label {
+        font-size: 46px;
+        stroke-width: 12px;
+    }
+
+    .mesh-ring-label {
+        font-size: 36px;
+    }
+
+    .mesh-node:not(.mesh-node-selected) {
+        stroke: transparent;
+        stroke-width: 44px;
+    }
+}
+
+/* A weak link is amber in the all links view, the cheapest tree stays blue. */
+.mesh-link-weak:not(.mesh-link-tree) {
+    stroke: rgba(217, 119, 6, 0.55);
+}
+
+.mesh-link-hover {
+    stroke: var(--sx-text);
+    stroke-width: 4;
+}
+
+/* The quiet device picked: where its traffic could hop instead, and for a cut off one what is holding it up. */
+.mesh-link.mesh-link-hop {
+    stroke: #0d9488;
+    stroke-width: 8;
+    stroke-dasharray: 18 12;
+}
+
+.mesh-link.mesh-link-blocked {
+    stroke: var(--sx-fault);
+    stroke-width: 8;
+    stroke-dasharray: 18 12;
+}
+
+.mesh-node-hop {
+    stroke: #0d9488;
+    stroke-width: 8;
+}
+
+/* A device not heard for a few seconds is drawn lighter. */
+.mesh-node-stale {
+    opacity: 0.45;
+}
+
+/* The topology page copies the shape of the command stream page: toolbar on top, a main column, and a sticky side panel. */
+.topo-toolbar {
+    position: sticky;
+    top: 4.4rem;
+    z-index: 10;
+    padding: 0.75rem 1rem;
+    background-color: var(--sx-surface);
+    border: 1px solid var(--sx-border);
+    border-radius: var(--sx-radius);
+    box-shadow: var(--sx-shadow);
+}
+
+body:has(.topo-page) .sx-container {
+    max-width: 1480px;
+}
+
+.topo-page {
+    display: flex;
+    flex-direction: column;
+}
+
+/* On a narrow screen the toolbar, then the route and history, then the drawing and lists. */
+.topo-main {
+    display: contents;
+}
+
+.topo-toolbar {
+    order: 0;
+}
+
+.topo-side {
+    order: 1;
+    margin-bottom: 1.5rem;
+}
+
+.topo-body {
+    order: 2;
+    min-width: 0;
+}
+
+@media (min-width: 1200px) {
+    .topo-page {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 24rem;
+        gap: 1.5rem;
+        align-items: start;
+    }
+
+    .topo-main {
+        display: block;
+        min-width: 0;
+    }
+
+    .topo-side {
+        position: sticky;
+        top: 4.4rem;
+        max-height: calc(100vh - 5.4rem);
+        margin-bottom: 0;
+        overflow-y: auto;
+    }
+}
+
+/* A fixed height so the lists scroll inside their card and the page stays short. */
+.topo-list {
+    max-height: 22rem;
+    overflow-y: auto;
+}
+
+.topo-list-short {
+    max-height: 14rem;
+}
+
+.topo-list thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: var(--sx-surface);
+}
+
+.topo-tabs a {
+    cursor: pointer;
+}
+
+.status-chip-up {
+    background-color: rgba(var(--sx-accent-rgb), 0.1);
+    color: var(--sx-accent);
+}
+
+.status-chip-gateway {
+    background-color: rgba(16, 24, 40, 0.08);
+    color: var(--sx-text);
+}
+
+.legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    color: var(--sx-text-muted);
+}
+
+.legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+/* The node classes colour an svg fill, so the key dots need the same colours as a background. */
+.legend-dot.mesh-node-up { background-color: var(--sx-accent); }
+.legend-dot.mesh-node-quiet { background-color: var(--sx-warn); }
+.legend-dot.mesh-node-cut { background-color: var(--sx-fault); }
+.legend-dot.mesh-node-gateway { background-color: var(--sx-text); }
+
+.legend-line {
+    width: 18px;
+    height: 0;
+    border-top: 3px solid var(--sx-accent);
+}
+
+.legend-line-route {
+    border-top-color: var(--sx-warn);
+}
+
+.legend-line-weak {
+    border-top: 2px solid rgba(217, 119, 6, 0.55);
+}
+
+.legend-line-hop {
+    border-top: 3px dashed #0d9488;
+}
+
+.legend-line-blocked {
+    border-top: 3px dashed var(--sx-fault);
+}
+
+/* The signal chips: good, ok or weak, so strong and weak links read at a glance. */
+.signal-chip {
+    display: inline-block;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.signal-good {
+    background-color: rgba(21, 128, 61, 0.12);
+    color: #15803d;
+}
+
+.signal-ok {
+    background-color: rgba(16, 24, 40, 0.07);
+    color: var(--sx-text);
+}
+
+.signal-weak {
+    background-color: rgba(217, 119, 6, 0.14);
+    color: var(--sx-warn);
+}
+
+/* Facts about the picked device, laid out in a row that wraps on a narrow panel. */
+.topo-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+}
+
+.topo-facts dt {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--sx-text-muted);
+}
+
+.topo-facts dd {
+    margin: 0;
+}
+
+.min-w-0 {
+    min-width: 0;
+}
+
+.topo-attention li + li {
+    margin-top: 0.4rem;
+}
+
+.topo-attention-row {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 0.45rem 0.65rem;
+    text-align: left;
+    background-color: var(--sx-surface);
+    border: 1px solid var(--sx-border);
+    border-radius: 8px;
+}
+
+.topo-attention-row:hover,
+.topo-attention-active {
+    border-color: var(--sx-accent);
+    background-color: rgba(var(--sx-accent-rgb), 0.05);
+}
+
+/* The route is a short chain of hops, the mac sits in the hover text. */
+.topo-route {
+    padding-left: 1.25rem;
+}
+
+.topo-route li {
+    padding-block: 0.15rem;
+}
+
+.topo-route-name {
+    margin-right: 0.4rem;
 }
 
 .ribbon-track {

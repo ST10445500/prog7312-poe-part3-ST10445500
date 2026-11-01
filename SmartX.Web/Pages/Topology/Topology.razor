@@ -6,12 +6,19 @@
 <PageTitle>Topology - Smart-X</PageTitle>
 
 <PageHeader Title="Topology"
-            Blurb="How the devices link up to reach the gateway, and which links are carrying a site." />
+            Blurb="Pick a device to see how it reaches the gateway, and which links are carrying traffic." />
 
 @if (_loadFailed)
 {
     <div class="alert alert-danger">
-        Cannot reach the gateway. The mesh on this page may be out of date.
+        @if (_mesh != null)
+        {
+            <span>Cannot reach the gateway. Showing what it last sent at @_lastUpdated?.ToLocalTime().ToString("HH:mm:ss").</span>
+        }
+        else
+        {
+            <span>Cannot reach the gateway. Nothing has loaded yet.</span>
+        }
     </div>
 }
 
@@ -32,245 +39,508 @@ else if (_mesh is { Nodes.Count: 0 })
 }
 else if (_mesh != null)
 {
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-        <span class="text-muted small">
-            @_mesh.Nodes.Count devices, @_mesh.Links.Count links
-        </span>
+    var quietCount = _mesh.Nodes.Count(n => n.Disconnected);
+    var cutOffCount = _mesh.Nodes.Count(IsCutOff);
+    var attention = AttentionDevices();
+    var picked = ChosenDevice();
 
-        @if (_lastUpdated != null)
-        {
-            <span class="text-muted small">
-                <span class="live-dot me-1"></span>Updated @_lastUpdated.Value.ToLocalTime().ToString("HH:mm:ss")
-            </span>
-        }
+    <div class="row g-3 mb-3">
+        <div class="col-6 col-md-3">
+            <StatTile Label="Devices" Value="@(_mesh.Nodes.Count(n => !n.IsGateway).ToString())" Note="besides the gateway" />
+        </div>
+        <div class="col-6 col-md-3">
+            <StatTile Label="Links" Value="@_mesh.Links.Count.ToString()"
+                      Note="@($"{_tree?.Edges.Count ?? 0} in the cheapest tree, cost {_tree?.TotalCost ?? 0}")"
+                      Title="The cheapest tree is Prim's. A link costs its signal strength without the minus sign, so a weaker link costs more." />
+        </div>
+        <div class="col-6 col-md-3">
+            <StatTile Label="Quiet" Value="@quietCount.ToString()" Note="stopped reporting"
+                      ValueClass="@(quietCount > 0 ? "stat-value-warn" : string.Empty)" />
+        </div>
+        <div class="col-6 col-md-3">
+            <StatTile Label="Cut off" Value="@cutOffCount.ToString()" Note="no way left to the gateway"
+                      ValueClass="@(cutOffCount > 0 ? "stat-value-fault" : string.Empty)" />
+        </div>
     </div>
 
-    <div class="card mb-4">
-        <div class="card-body">
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-                <h2 class="h5 mb-0">Mesh</h2>
-                <div class="btn-group btn-group-sm" role="group">
-                    <button type="button" class="btn @(_treeOnly ? "btn-outline-primary" : "btn-primary")" @onclick="() => _treeOnly = false">All links</button>
-                    <button type="button" class="btn @(_treeOnly ? "btn-primary" : "btn-outline-primary")" @onclick="() => _treeOnly = true">Tree only</button>
+    @* Offered as suggestions in the route box, so a mac does not have to be typed in full. *@
+    <datalist id="device-macs">
+        @foreach (var node in _mesh.Nodes.Where(n => !n.IsGateway))
+        {
+            <option value="@node.MacAddress">@node.Name</option>
+        }
+    </datalist>
+
+    <div class="topo-page">
+        <div class="topo-main">
+            <div class="topo-toolbar mb-3">
+                <div class="row g-2 align-items-center">
+                    <div class="col-12 col-md">
+                        <form class="d-flex gap-2" @onsubmit="ShowRoute">
+                            <div class="input-group">
+                                <input class="form-control font-monospace" placeholder="Mac address, or pick a device"
+                                       aria-label="Mac address of a device" list="device-macs"
+                                       @bind="State.RouteSearch" @bind:event="oninput" />
+                                @if (State.RouteSearch.Length > 0)
+                                {
+                                    <button type="button" class="btn btn-outline-secondary" aria-label="Clear the picked device"
+                                            @onclick="ClearPick">&times;</button>
+                                }
+                            </div>
+                            <button type="submit" class="btn btn-primary text-nowrap">Show route</button>
+                        </form>
+                    </div>
+                    <div class="col-auto">
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Which links to draw">
+                            <button type="button" class="btn @(_treeOnly ? "btn-outline-primary" : "btn-primary")" @onclick="() => _treeOnly = false">All links</button>
+                            <button type="button" class="btn @(_treeOnly ? "btn-primary" : "btn-outline-primary")" @onclick="() => _treeOnly = true">Tree only</button>
+                        </div>
+                    </div>
+                    <div class="col-auto d-flex align-items-center gap-2">
+                        @if (_paused)
+                        {
+                            <span class="badge text-bg-warning" title="The drawing is held still. Resume to catch up.">Paused</span>
+                        }
+                        else if (State.Connected)
+                        {
+                            <span class="badge text-bg-success" title="The gateway pushes changes, and the drawing catches up every few seconds.">Live</span>
+                        }
+                        else
+                        {
+                            <span class="badge text-bg-secondary" title="Asking the gateway for updates every few seconds.">Polling</span>
+                        }
+
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="TogglePause">@(_paused ? "Resume" : "Pause")</button>
+
+                        @if (_lastUpdated != null)
+                        {
+                            <span class="topo-clock text-muted small text-nowrap">@_lastUpdated.Value.ToLocalTime().ToString("HH:mm:ss")</span>
+                        }
+                    </div>
                 </div>
             </div>
 
-            <svg class="mesh-svg" viewBox="0 0 500 500" role="img" aria-label="Drawing of the mesh">
-                @foreach (var link in _mesh.Links)
-                {
-                    var inTree = InTree(link);
-
-                    if (_treeOnly && !inTree)
-                    {
-                        continue;
-                    }
-
-                    var from = Position(link.MacA);
-                    var to = Position(link.MacB);
-
-                    <line class="mesh-link @(inTree ? "mesh-link-tree" : "") @(IsQuietLink(link) ? "mesh-link-quiet" : "") @(InRoute(link) ? "mesh-link-route" : "")"
-                          x1="@from.X" y1="@from.Y" x2="@to.X" y2="@to.Y">
-                        <title>@link.MacA to @link.MacB, @link.Rssi dBm</title>
-                    </line>
-                }
-
-                @foreach (var node in _mesh.Nodes)
-                {
-                    var spot = Position(node.MacAddress);
-
-                    <circle class="mesh-node @NodeClass(node) @(IsSelected(node) ? "mesh-node-selected" : "")" cx="@spot.X" cy="@spot.Y" r="@(node.IsGateway ? 12 : 7)"
-                            @onclick="() => SelectNode(node.MacAddress)">
-                        <title>@node.Name (@node.MacAddress), hops @(node.HopCount?.ToString() ?? "-")</title>
-                    </circle>
-                }
-            </svg>
-
-            <div class="text-muted small">
-                Blue is up, orange is quiet, red is cut off from the gateway, black is the gateway. Thick blue links are the cheapest routes to the gateway. Click a device to trace its route.
-            </div>
-        </div>
-    </div>
-
-    <div class="card mb-4">
-        <div class="card-body">
-            <h2 class="h5">Route</h2>
-
-            <form class="d-flex gap-2 mb-3" @onsubmit="ShowRoute">
-                <input class="form-control font-monospace" placeholder="Mac address of a device"
-                       aria-label="Mac address of a device"
-                       @bind="State.RouteSearch" @bind:event="oninput" />
-                <button type="submit" class="btn btn-primary text-nowrap">Show route</button>
-            </form>
-
-            @if (_routeMessage != null)
-            {
-                <div class="text-muted">@_routeMessage</div>
-            }
-
-            @if (_route.Count > 0)
-            {
-                <div class="small text-muted mb-1">@(_route.Count - 1) hops to the gateway, cheapest route</div>
-                <ol class="mb-0">
-                    @foreach (var hop in _route)
-                    {
-                        <li>
-                            @hop.Name
-                            <span class="font-monospace text-muted small">@hop.Mac</span>
-                            @if (hop.Rssi != null)
-                            {
-                                <span class="text-muted small">, @hop.Rssi dBm to the hop before</span>
-                            }
-                        </li>
-                    }
-                </ol>
-            }
-
-            @if (_alternatives.Count > 0)
-            {
-                <div class="mt-2">Neighbours that can still reach the gateway:</div>
-                <ul class="mb-0">
-                    @foreach (var mac in _alternatives)
-                    {
-                        <li class="font-monospace">@mac</li>
-                    }
-                </ul>
-            }
-        </div>
-    </div>
-
-    @if (ChosenDevice() is { } chosen)
-    {
-        <div class="card mb-4">
-            <div class="card-body">
-                <h2 class="h5">Radio history for <span class="font-monospace">@chosen.MacAddress</span></h2>
-
-                @if (chosen.IsGateway)
-                {
-                    <div class="text-muted">The gateway does not send readings, pick a device.</div>
-                }
-                else
-                {
-                    <div class="d-flex flex-wrap gap-2 mb-2">
-                        <div class="btn-group btn-group-sm" role="group" aria-label="History range">
-                            @foreach (var (minutes, label) in HistoryRanges)
-                            {
-                                <button type="button" class="btn @(_historyMinutes == minutes ? "btn-primary" : "btn-outline-primary")"
-                                        @onclick="() => ChooseRange(minutes)">@label</button>
-                            }
+            <div class="topo-body">
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h2 class="section-title mb-0">Mesh</h2>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="Zoom the drawing">
+                                <button type="button" class="btn btn-outline-secondary" aria-label="Zoom out" disabled="@(_zoom == ZoomSteps[0])" @onclick="() => Zoom(-1)">&minus;</button>
+                                <button type="button" class="btn btn-outline-secondary" aria-label="Show the whole mesh" disabled="@(_zoom == 1)" @onclick="() => _zoom = 1">Fit</button>
+                                <button type="button" class="btn btn-outline-secondary" aria-label="Zoom in on the picked device" disabled="@(_zoom == ZoomSteps[^1])" @onclick="() => Zoom(1)">+</button>
+                            </div>
                         </div>
 
-                        <div class="btn-group btn-group-sm" role="group" aria-label="Radio number">
-                            @foreach (var metric in Metrics)
+                        <svg class="mesh-svg" viewBox="@ViewBox()" role="group" aria-label="Drawing of the mesh, each device can be picked">
+                            @foreach (var ring in _rings)
                             {
-                                <button type="button" class="btn @(_metric == metric ? "btn-primary" : "btn-outline-primary")"
-                                        @onclick="() => ChooseMetric(metric)">@metric</button>
+                                <circle class="mesh-ring" cx="@Centre" cy="@Centre" r="@ring.Radius"></circle>
+                                <g><text class="mesh-ring-label" x="@Centre" y="@(Centre - ring.Radius - 8)" text-anchor="middle">@ring.Label</text></g>
                             }
+
+                            @foreach (var link in _mesh.Links)
+                            {
+                                var inTree = InTree(link);
+
+                                if (_treeOnly && !inTree)
+                                {
+                                    continue;
+                                }
+
+                                var from = Position(link.MacA);
+                                var to = Position(link.MacB);
+
+                                <line class="mesh-link @(inTree ? "mesh-link-tree" : "") @(link.Rssi < WeakSignal ? "mesh-link-weak" : "") @(IsQuietLink(link) ? "mesh-link-quiet" : "") @(InRoute(link) ? "mesh-link-route" : "") @(IsHoverLink(link) ? "mesh-link-hover" : "") @(IsHopLink(link) ? "mesh-link-hop" : "") @(IsBlockedLink(link) ? "mesh-link-blocked" : "")"
+                                      x1="@from.X" y1="@from.Y" x2="@to.X" y2="@to.Y">
+                                    <title>@link.MacA to @link.MacB, @link.Rssi dBm</title>
+                                </line>
+                            }
+
+                            @foreach (var node in _mesh.Nodes)
+                            {
+                                var spot = Position(node.MacAddress);
+
+                                <circle class="mesh-node @NodeClass(node) @(IsStale(node) ? "mesh-node-stale" : "") @(_hopSet.Contains(node.MacAddress) ? "mesh-node-hop" : "") @(IsSelected(node) ? "mesh-node-selected" : "") @(IsHover(node.MacAddress) ? "mesh-node-hover" : "")"
+                                        cx="@spot.X" cy="@spot.Y" r="@(node.IsGateway ? GatewayRadius : NodeRadius)"
+                                        tabindex="0" role="button" aria-label="@node.Name, @DescribeStatus(node)"
+                                        @onclick="() => SelectNode(node.MacAddress)"
+                                        @onkeydown="e => OnNodeKey(e, node.MacAddress)"
+                                        @onmouseenter="() => _hoverMac = node.MacAddress"
+                                        @onmouseleave="() => _hoverMac = null">
+                                    <title>@node.Name (@node.MacAddress), hops @(node.HopCount?.ToString() ?? "-")@(node.IsGateway ? string.Empty : ", heard " + HeardAgo(node))</title>
+                                </circle>
+                            }
+
+                            @* Names only for the gateway, the picked device and the devices it hears, so the drawing stays readable. *@
+                            @foreach (var node in _mesh.Nodes.Where(ShowLabel))
+                            {
+                                var spot = Position(node.MacAddress);
+
+                                <g><text class="mesh-label" x="@spot.X" y="@(spot.Y + (node.IsGateway ? GatewayRadius : NodeRadius) + 24)" text-anchor="middle">@node.Name</text></g>
+                            }
+                        </svg>
+
+                        <div class="legend mt-2">
+                            <span class="legend-title">Key</span>
+                            <span class="legend-item"><span class="legend-dot mesh-node-up"></span>Up</span>
+                            <span class="legend-item"><span class="legend-dot mesh-node-quiet"></span>Quiet</span>
+                            <span class="legend-item"><span class="legend-dot mesh-node-cut"></span>Cut off</span>
+                            <span class="legend-item"><span class="legend-dot mesh-node-gateway"></span>Gateway</span>
+                            <span class="legend-item"><span class="legend-line legend-line-tree"></span>Cheapest tree</span>
+                            <span class="legend-item"><span class="legend-line legend-line-route"></span>Route being traced</span>
+                            <span class="legend-item"><span class="legend-line legend-line-weak"></span>Weak link, under @WeakSignal dBm</span>
+                            <span class="legend-item"><span class="legend-line legend-line-hop"></span>Hop here instead</span>
+                            <span class="legend-item"><span class="legend-line legend-line-blocked"></span>Held up by a quiet device</span>
                         </div>
                     </div>
+                </div>
 
-                    @if (_historyFailed)
-                    {
-                        <div class="alert alert-danger mb-0">Could not load the history for this device.</div>
-                    }
-                    else if (_history == null)
-                    {
-                        <div class="text-muted">Loading...</div>
-                    }
-                    else if (_history.Count == 0)
-                    {
-                        <div class="text-muted">
-                            @(_historyMinutes == 0 ? "No readings kept for this device yet." : "No readings in this range.")
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="subnav topo-tabs mt-0 mb-3" role="tablist">
+                            <a role="tab" aria-selected="@(_listTab == ListTab.Devices ? "true" : "false")" class="@(_listTab == ListTab.Devices ? "active" : string.Empty)"
+                               href="" @onclick="() => ChooseTab(ListTab.Devices)" @onclick:preventDefault="true">Devices (@_mesh.Nodes.Count)</a>
+                            <a role="tab" aria-selected="@(_listTab == ListTab.Links ? "true" : "false")" class="@(_listTab == ListTab.Links ? "active" : string.Empty)"
+                               href="" @onclick="() => ChooseTab(ListTab.Links)" @onclick:preventDefault="true">Links (@_mesh.Links.Count)</a>
                         </div>
-                    }
-                    else
-                    {
-                        <div class="mb-2 text-primary">
-                            <TimelineChart Points="_chart" />
+
+                        @if (_listTab == ListTab.Devices)
+                        {
+                            var devices = FilteredDevices();
+
+                            <div class="row g-2 mb-2">
+                                <div class="col-12 col-sm">
+                                    <input class="form-control form-control-sm" placeholder="Search by name or mac address"
+                                           aria-label="Search devices" @bind="_deviceSearch" @bind:event="oninput" />
+                                </div>
+                                <div class="col-12 col-sm-auto">
+                                    <select class="form-select form-select-sm" aria-label="Filter by status" @bind="_statusFilter">
+                                        <option value="">Any status</option>
+                                        <option value="Up">Up</option>
+                                        <option value="Quiet">Quiet</option>
+                                        <option value="Cut off">Cut off</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            @if (devices.Count == 0)
+                            {
+                                <div class="text-center text-muted py-4">No devices match.</div>
+                            }
+                            else
+                            {
+                                <div class="topo-list">
+                                    <table class="table table-hover table-sm align-middle mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>Device</th>
+                                                <th class="d-none d-sm-table-cell">Hops</th>
+                                                <th class="d-none d-md-table-cell">Via</th>
+                                                <th class="text-end">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var node in devices)
+                                            {
+                                                <tr class="device-row @(IsSelected(node) ? "table-active" : string.Empty)" @onclick="() => SelectNode(node.MacAddress)"
+                                                    @onmouseenter="() => _hoverMac = node.MacAddress" @onmouseleave="() => _hoverMac = null">
+                                                    <td>
+                                                        <button type="button" class="btn btn-link btn-sm p-0 text-start text-decoration-none"
+                                                                @onclick="() => SelectNode(node.MacAddress)" @onclick:stopPropagation="true">@node.Name</button>
+                                                        <div class="small text-muted font-monospace">@node.MacAddress</div>
+                                                    </td>
+                                                    <td class="d-none d-sm-table-cell">@(node.HopCount?.ToString() ?? "-")</td>
+                                                    <td class="d-none d-md-table-cell text-muted">@NextHopName(node)</td>
+                                                    <td class="text-end"><span class="status-chip @StatusChipClass(node)">@DescribeStatus(node)</span></td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            var links = FilteredLinks();
+
+                            <div class="row g-2 mb-2 align-items-center">
+                                <div class="col-12 col-sm">
+                                    <input class="form-control form-control-sm" placeholder="Search by mac address"
+                                           aria-label="Search links" @bind="_linkSearch" @bind:event="oninput" />
+                                </div>
+                                <div class="col-12 col-sm-auto">
+                                    <div class="form-check mb-0">
+                                        <input id="onlyPicked" class="form-check-input" type="checkbox" @bind="_onlyPicked" disabled="@(picked == null)" />
+                                        <label class="form-check-label" for="onlyPicked">Only the picked device</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            @if (links.Count == 0)
+                            {
+                                <div class="text-center text-muted py-4">No links match.</div>
+                            }
+                            else
+                            {
+                                <div class="topo-list">
+                                    <table class="table table-hover table-sm align-middle mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>From</th>
+                                                <th>To</th>
+                                                <th class="text-end">Signal</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var link in links)
+                                            {
+                                                <tr>
+                                                    <td class="font-monospace small">@link.MacA</td>
+                                                    <td class="font-monospace small">@link.MacB</td>
+                                                    <td class="text-end"><span class="signal-chip @SignalClass(link.Rssi)">@link.Rssi dBm</span></td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <aside class="topo-side">
+            @if (picked == null)
+            {
+                @* Nothing to say on a narrow screen until something is picked, the drawing comes first there. *@
+                <div class="card mb-3 d-none d-xl-block">
+                    <div class="card-body">
+                        <h2 class="section-title">Picked device</h2>
+                        <div class="text-muted">Click a device in the drawing or the list to see how it reaches the gateway.</div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div class="min-w-0">
+                                <h2 class="h5 mb-0">@picked.Name</h2>
+                                <div class="font-monospace small text-muted">@picked.MacAddress</div>
+                            </div>
+                            <span class="status-chip @StatusChipClass(picked)">@DescribeStatus(picked)</span>
                         </div>
-                        <div class="small text-muted mb-2">Newest @Math.Min(_history.Count, HistoryRows) of @_history.Count in this range.</div>
-                        <div class="table-responsive">
-                            <table class="table table-sm mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>Recorded</th>
-                                        <th>Signal</th>
-                                        <th>Hops</th>
-                                        <th>Duty cycle</th>
-                                        <th>Packet loss</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var point in _history.AsEnumerable().Reverse().Take(HistoryRows))
+
+                        @if (!picked.IsGateway)
+                        {
+                            var nextSignal = SignalToNextHop(picked);
+
+                            <dl class="topo-facts mb-2 mt-3">
+                                <div>
+                                    <dt>Hops</dt>
+                                    <dd>@(picked.HopCount?.ToString() ?? "-")</dd>
+                                </div>
+                                <div>
+                                    <dt>Via</dt>
+                                    <dd>@NextHopName(picked)</dd>
+                                </div>
+                                <div>
+                                    <dt>Heard</dt>
+                                    <dd>@HeardAgo(picked)</dd>
+                                </div>
+                                <div>
+                                    <dt>Signal</dt>
+                                    <dd>
+                                        @if (nextSignal != null)
+                                        {
+                                            <span class="signal-chip @SignalClass(nextSignal.Value)">@nextSignal dBm</span>
+                                        }
+                                        else
+                                        {
+                                            <span>-</span>
+                                        }
+                                    </dd>
+                                </div>
+                            </dl>
+                        }
+
+                        <button type="button" class="btn btn-link btn-sm p-0" @onclick="ClearPick">Clear</button>
+                    </div>
+                </div>
+            }
+
+            @if (attention.Count > 0)
+            {
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h2 class="section-title">Needs attention (@attention.Count)</h2>
+                        <ul class="list-unstyled mb-0 topo-attention">
+                            @foreach (var node in attention)
+                            {
+                                <li>
+                                    <button type="button" class="topo-attention-row @(IsSelected(node) ? "topo-attention-active" : string.Empty)"
+                                            @onclick="() => SelectNode(node.MacAddress)">
+                                        <span class="d-flex justify-content-between align-items-center gap-2">
+                                            <span class="fw-semibold">@node.Name</span>
+                                            <span class="status-chip @StatusChipClass(node)">@DescribeStatus(node)</span>
+                                        </span>
+                                        <span class="small text-muted">@AttentionNote(node)</span>
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                </div>
+            }
+
+            @if (_routeMessage != null || _route.Count > 0 || _alternatives.Count > 0)
+            {
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h2 class="section-title">Route</h2>
+
+                        @if (_routeMessage != null)
+                        {
+                            <div class="text-muted">@_routeMessage</div>
+                        }
+
+                        @if (_route.Count > 0)
+                        {
+                            <div class="small text-muted mb-2"
+                                 title="Cost is the signal strength without the minus sign, the same weight the cheapest tree uses.">
+                                @(_route.Count - 1) @(_route.Count == 2 ? "hop" : "hops") to the gateway, cost @_route.Sum(h => Math.Abs(h.Rssi ?? 0))
+                            </div>
+                            <ol class="topo-route mb-0">
+                                @foreach (var hop in _route)
+                                {
+                                    <li title="@hop.Mac">
+                                        <span class="topo-route-name">@hop.Name</span>
+                                        @if (hop.Rssi != null)
+                                        {
+                                            <span class="signal-chip @SignalClass(hop.Rssi.Value)">@hop.Rssi dBm</span>
+                                        }
+                                    </li>
+                                }
+                            </ol>
+                        }
+
+                        @if (_alternatives.Count > 0)
+                        {
+                            <div class="mt-2 small">Hop here instead, these neighbours can still reach the gateway:</div>
+                            <ul class="mb-0 small">
+                                @foreach (var mac in _alternatives)
+                                {
+                                    <li>@NameOf(mac) <span class="font-monospace text-muted">@mac</span></li>
+                                }
+                            </ul>
+                        }
+
+                        @if (_blockers.Count > 0)
+                        {
+                            <div class="mt-2 small">Held up by these quiet neighbours:</div>
+                            <ul class="mb-0 small">
+                                @foreach (var mac in _blockers)
+                                {
+                                    <li>@NameOf(mac) <span class="font-monospace text-muted">@mac</span></li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (picked != null)
+            {
+                <div class="card">
+                    <div class="card-body">
+                        <h2 class="section-title">Radio history</h2>
+
+                        @if (picked.IsGateway)
+                        {
+                            <div class="text-muted">The gateway does not send readings, pick a device.</div>
+                        }
+                        else
+                        {
+                            <div class="d-flex flex-wrap gap-2 mb-2">
+                                <div class="btn-group btn-group-sm" role="group" aria-label="History range">
+                                    @foreach (var (minutes, label) in HistoryRanges)
                                     {
-                                        <tr>
-                                            <td class="text-muted small">@point.RecordedAt.ToLocalTime().ToString("HH:mm:ss")</td>
-                                            <td>@(point.Rssi?.ToString() ?? "-") dBm</td>
-                                            <td>@(point.HopCount?.ToString() ?? "-")</td>
-                                            <td>@(point.DutyCycle?.ToString("0.#") ?? "-")%</td>
-                                            <td>@(point.PacketLoss?.ToString("0.#") ?? "-")%</td>
-                                        </tr>
+                                        <button type="button" class="btn @(_historyMinutes == minutes ? "btn-primary" : "btn-outline-primary")"
+                                                @onclick="() => ChooseRange(minutes)">@label</button>
                                     }
-                                </tbody>
-                            </table>
-                        </div>
-                    }
-                }
-            </div>
-        </div>
-    }
+                                </div>
 
-    <div class="row g-3">
-        <div class="col-12 col-lg-6">
-            <h2 class="h5">Devices</h2>
-            <div class="table-responsive">
-                <table class="table table-hover align-middle">
-                    <thead>
-                        <tr>
-                            <th>Device</th>
-                            <th>Mac Address</th>
-                            <th>Hops</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var node in _mesh.Nodes)
-                        {
-                            <tr>
-                                <td>@node.Name</td>
-                                <td class="font-monospace">@node.MacAddress</td>
-                                <td>@(node.HopCount?.ToString() ?? "-")</td>
-                                <td>@DescribeStatus(node)</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        </div>
+                                <div class="btn-group btn-group-sm" role="group" aria-label="Radio number">
+                                    @foreach (var metric in Metrics)
+                                    {
+                                        <button type="button" class="btn @(_metric == metric ? "btn-primary" : "btn-outline-primary")"
+                                                @onclick="() => ChooseMetric(metric)">@metric</button>
+                                    }
+                                </div>
+                            </div>
 
-        <div class="col-12 col-lg-6">
-            <h2 class="h5">Links</h2>
-            <div class="table-responsive">
-                <table class="table table-hover align-middle">
-                    <thead>
-                        <tr>
-                            <th>From</th>
-                            <th>To</th>
-                            <th>Signal</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var link in _mesh.Links)
-                        {
-                            <tr>
-                                <td class="font-monospace">@link.MacA</td>
-                                <td class="font-monospace">@link.MacB</td>
-                                <td>@link.Rssi dBm</td>
-                            </tr>
+                            @if (_historyFailed)
+                            {
+                                <div class="alert alert-danger mb-0">Could not load the history for this device.</div>
+                            }
+                            else if (_history == null)
+                            {
+                                <div class="text-muted">Loading...</div>
+                            }
+                            else if (_history.Count == 0)
+                            {
+                                <div class="text-muted">
+                                    @(_historyMinutes == 0 ? "No readings kept for this device yet." : "No readings in this range.")
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="mb-2 text-primary">
+                                    <TimelineChart Points="_chart" />
+                                </div>
+
+                                <button type="button" class="btn btn-link btn-sm p-0 mb-2" aria-expanded="@(_showReadings ? "true" : "false")"
+                                        @onclick="() => _showReadings = !_showReadings">
+                                    @(_showReadings ? "Hide readings" : $"Show the newest {Math.Min(_history.Count, HistoryRows)} of {_history.Count} readings")
+                                </button>
+
+                                @if (_showReadings)
+                                {
+                                    <div class="topo-list topo-list-short">
+                                        <table class="table table-sm mb-0">
+                                            <thead>
+                                                <tr>
+                                                    <th>Time</th>
+                                                    <th>Signal</th>
+                                                    <th>Hops</th>
+                                                    <th>Duty</th>
+                                                    <th>Loss</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var point in _history.AsEnumerable().Reverse().Take(HistoryRows))
+                                                {
+                                                    <tr>
+                                                        <td class="text-muted small">@point.RecordedAt.ToLocalTime().ToString("HH:mm:ss")</td>
+                                                        <td>@(point.Rssi?.ToString() ?? "-")</td>
+                                                        <td>@(point.HopCount?.ToString() ?? "-")</td>
+                                                        <td>@(point.DutyCycle?.ToString("0.#") ?? "-")%</td>
+                                                        <td>@(point.PacketLoss?.ToString("0.#") ?? "-")%</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                            }
                         }
-                    </tbody>
-                </table>
-            </div>
-        </div>
+                    </div>
+                </div>
+            }
+        </aside>
     </div>
 }
 
@@ -278,8 +548,24 @@ else if (_mesh != null)
     // The push does the quick refresh, the poll is only the fallback when the hub is down.
     private const int PollIntervalMilliseconds = 5000;
 
-    private const double Centre = 250;
-    private const double CircleRadius = 210;
+    // The middle of the drawing never moves, so a position that was worked out once stays right.
+    private const double Centre = 700;
+
+    // Every ring is the same distance from the one inside it, however many rings there are, so a deeper tree adds rings on the outside and nothing else changes size.
+    private const double InnerRadius = 64;
+    private const double RingStep = 48;
+    private const double CanvasMargin = 60;
+    private const double NodeRadius = 14;
+    private const double GatewayRadius = 22;
+
+    // The drawing leaves room for at least this many rings, the last one being the ring for devices with no route.
+    private const int MinRings = 8;
+
+    // The most rings the drawing has needed this visit. It only grows, so the scale does not change back and forth.
+    private int _ringCapacity = MinRings;
+
+    private static readonly int[] ZoomSteps = { 1, 2, 3, 4 };
+    private int _zoom = 1;
 
     private TopologySnapshot? _mesh;
     private MeshTree? _tree;
@@ -297,6 +583,33 @@ else if (_mesh != null)
     private readonly HashSet<string> _routePairs = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<RouteHop> _route = new();
     private readonly List<string> _alternatives = new();
+    private readonly HashSet<string> _neighbours = new(StringComparer.OrdinalIgnoreCase);
+
+    // The devices a quiet picked device could hand its traffic to, and the quiet neighbours holding up a cut off one.
+    private readonly HashSet<string> _hopSet = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _blockers = new();
+
+    // A device not heard for this long is drawn lighter, before the gateway calls it quiet.
+    private const int StaleSeconds = 12;
+
+    private readonly List<(double Radius, string Label)> _rings = new();
+
+    // The last layout that was drawn, kept so the picture does not move with every wobble in the signal.
+    private readonly Dictionary<string, (double X, double Y)> _heldSpots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<(double Radius, string Label)> _heldRings = new();
+
+    // The tree that is drawn and traced, a steadier copy of the one the api sends. A device only changes parent here once the same new parent has come back a few times in a row, so the links never disagree with where the devices are drawn.
+    private readonly Dictionary<string, string> _drawParents = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (string Candidate, int Count)> _parentVotes = new(StringComparer.OrdinalIgnoreCase);
+
+    // How many refreshes in a row a device has to hang off a different parent before the drawing is laid out again.
+    private const int ParentChangeRefreshes = 3;
+
+    // The push can come several times a second, the drawing only needs to catch up now and then.
+    private const int MinReloadMilliseconds = 3000;
+
+    private long _lastLoadTick;
+    private bool _paused;
 
     private MeshReach? _reach;
     private string _routeMac = string.Empty;
@@ -322,6 +635,216 @@ else if (_mesh != null)
     private string _metric = "Signal";
 
     private record RouteHop(string Name, string Mac, int? Rssi);
+
+    private enum ListTab
+    {
+        Devices,
+        Links
+    }
+
+    private ListTab _listTab = ListTab.Devices;
+    private string _deviceSearch = string.Empty;
+    private string _statusFilter = string.Empty;
+    private string _linkSearch = string.Empty;
+    private bool _onlyPicked;
+
+    //switches between the devices list and the links list
+    private void ChooseTab(ListTab tab)
+    {
+        _listTab = tab;
+    }
+
+    //retrieves the devices that match the search text and the status filter
+    private List<TopologyNode> FilteredDevices()
+    {
+        var search = _deviceSearch.Trim();
+
+        return _mesh!.Nodes
+            .Where(n => search.Length == 0
+                || n.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || n.MacAddress.Contains(search, StringComparison.OrdinalIgnoreCase))
+            .Where(n => _statusFilter.Length == 0 || DescribeStatus(n) == _statusFilter)
+            .ToList();
+    }
+
+    //retrieves the links that match the search text, or only the picked device's links when that is ticked
+    private List<TopologyLink> FilteredLinks()
+    {
+        var search = _linkSearch.Trim();
+
+        return _mesh!.Links
+            .Where(l => search.Length == 0
+                || l.MacA.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || l.MacB.Contains(search, StringComparison.OrdinalIgnoreCase))
+            .Where(l => !_onlyPicked || _routeMac.Length == 0
+                || string.Equals(l.MacA, _routeMac, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(l.MacB, _routeMac, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    //picks the chip colour for a device's status
+    private string StatusChipClass(TopologyNode node)
+    {
+        return DescribeStatus(node) switch
+        {
+            "Quiet" => "status-chip-spike",
+            "Cut off" => "status-chip-silent",
+            "Gateway" => "status-chip-gateway",
+            _ => "status-chip-up"
+        };
+    }
+
+    // Below this a link is drawn as weak. A chip reads good at -60 or better and ok down to this.
+    private const int WeakSignal = -80;
+    private const int GoodSignal = -60;
+
+    private string? _hoverMac;
+    private bool _showReadings;
+
+    //says how strong a signal is, as the css class for its chip
+    private static string SignalClass(int rssi)
+    {
+        if (rssi >= GoodSignal)
+        {
+            return "signal-good";
+        }
+
+        return rssi >= WeakSignal ? "signal-ok" : "signal-weak";
+    }
+
+    //retrieves the devices that have gone quiet or been cut off, quiet ones first
+    private List<TopologyNode> AttentionDevices()
+    {
+        return _mesh!.Nodes
+            .Where(n => !n.IsGateway && (n.Disconnected || IsCutOff(n)))
+            .OrderBy(n => n.Disconnected ? 0 : 1)
+            .ThenBy(n => n.Name, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    //says what is left for a device that needs attention
+    private string AttentionNote(TopologyNode node)
+    {
+        if (node.Disconnected && _reach != null && _reach.Reroutes.TryGetValue(node.MacAddress, out var live))
+        {
+            return live.Count == 0
+                ? "No live neighbours left"
+                : $"{live.Count} live {(live.Count == 1 ? "neighbour" : "neighbours")} can still carry";
+        }
+
+        return node.Disconnected ? "Stopped reporting" : "No way left to the gateway";
+    }
+
+    //retrieves the name of the device a device hands its traffic to, or a dash if it has no route
+    private string NextHopName(TopologyNode node)
+    {
+        if (_mesh == null || !_drawParents.TryGetValue(node.MacAddress, out var parent))
+        {
+            return "-";
+        }
+
+        var next = _mesh.Nodes.FirstOrDefault(n => string.Equals(n.MacAddress, parent, StringComparison.OrdinalIgnoreCase));
+
+        return next?.Name ?? parent;
+    }
+
+    //retrieves the signal on the link to the device's next hop, or null if it has no route
+    private int? SignalToNextHop(TopologyNode node)
+    {
+        if (!_drawParents.TryGetValue(node.MacAddress, out var parent))
+        {
+            return null;
+        }
+
+        return _rssi.TryGetValue(PairKey(node.MacAddress, parent), out var rssi) ? rssi : null;
+    }
+
+    //forgets the picked device and everything drawn for it
+    private void ClearPick()
+    {
+        State.RouteSearch = string.Empty;
+        _routeMac = string.Empty;
+        _history = null;
+        _historyFailed = false;
+        _showReadings = false;
+        UpdateRoute();
+        RebuildChart();
+    }
+
+    //picks the device when enter or space is pressed on its node
+    private async Task OnNodeKey(KeyboardEventArgs e, string mac)
+    {
+        if (e.Key is "Enter" or " ")
+        {
+            await SelectNode(mac);
+        }
+    }
+
+    //says whether an up device has not been heard for a few seconds, which is before the gateway calls it quiet
+    private static bool IsStale(TopologyNode node)
+    {
+        return !node.IsGateway
+            && !node.Disconnected
+            && node.LastSeen != null
+            && (DateTime.UtcNow - node.LastSeen.Value).TotalSeconds > StaleSeconds;
+    }
+
+    //says how long ago the device was last heard, in seconds or minutes
+    private static string HeardAgo(TopologyNode node)
+    {
+        if (node.IsGateway)
+        {
+            return "-";
+        }
+
+        if (node.LastSeen == null)
+        {
+            return "never";
+        }
+
+        var seconds = Math.Max(0, (int)(DateTime.UtcNow - node.LastSeen.Value).TotalSeconds);
+
+        return seconds < 60 ? $"{seconds}s ago" : $"{seconds / 60}m ago";
+    }
+
+    //retrieves the name of a device from its mac address, or the mac address if the mesh has no name for it
+    private string NameOf(string mac)
+    {
+        return _mesh?.Nodes.FirstOrDefault(n => string.Equals(n.MacAddress, mac, StringComparison.OrdinalIgnoreCase))?.Name ?? mac;
+    }
+
+    //says whether the link joins the picked quiet device to a neighbour it could hand its traffic to
+    private bool IsHopLink(TopologyLink link)
+    {
+        return _hopSet.Count > 0
+            && ((IsSelectedMac(link.MacA) && _hopSet.Contains(link.MacB)) || (IsSelectedMac(link.MacB) && _hopSet.Contains(link.MacA)));
+    }
+
+    //says whether the link joins the picked cut off device to a quiet neighbour that is holding it up
+    private bool IsBlockedLink(TopologyLink link)
+    {
+        return _blockers.Count > 0
+            && ((IsSelectedMac(link.MacA) && _blockers.Contains(link.MacB, StringComparer.OrdinalIgnoreCase))
+                || (IsSelectedMac(link.MacB) && _blockers.Contains(link.MacA, StringComparer.OrdinalIgnoreCase)));
+    }
+
+    //says whether the mac address is the one being traced
+    private bool IsSelectedMac(string mac)
+    {
+        return _routeMac.Length > 0 && string.Equals(mac, _routeMac, StringComparison.OrdinalIgnoreCase);
+    }
+
+    //says whether the pointer is over this device, in the drawing or the list
+    private bool IsHover(string mac)
+    {
+        return _hoverMac != null && string.Equals(mac, _hoverMac, StringComparison.OrdinalIgnoreCase);
+    }
+
+    //says whether either end of the link is the device the pointer is over
+    private bool IsHoverLink(TopologyLink link)
+    {
+        return IsHover(link.MacA) || IsHover(link.MacB);
+    }
 
     //says whether the route being traced uses this link
     private bool InRoute(TopologyLink link)
@@ -461,11 +984,26 @@ else if (_mesh != null)
         _route.Clear();
         _routePairs.Clear();
         _alternatives.Clear();
+        _neighbours.Clear();
+        _hopSet.Clear();
+        _blockers.Clear();
         _routeMessage = null;
 
         if (_mesh == null || _tree == null || _routeMac.Length == 0)
         {
             return;
+        }
+
+        foreach (var link in _mesh.Links)
+        {
+            if (string.Equals(link.MacA, _routeMac, StringComparison.OrdinalIgnoreCase))
+            {
+                _neighbours.Add(link.MacB);
+            }
+            else if (string.Equals(link.MacB, _routeMac, StringComparison.OrdinalIgnoreCase))
+            {
+                _neighbours.Add(link.MacA);
+            }
         }
 
         var target = _mesh.Nodes.FirstOrDefault(n => string.Equals(n.MacAddress, _routeMac, StringComparison.OrdinalIgnoreCase));
@@ -482,7 +1020,7 @@ else if (_mesh != null)
             return;
         }
 
-        if (!_tree.Parents.ContainsKey(target.MacAddress))
+        if (!_drawParents.ContainsKey(target.MacAddress))
         {
             if (target.Disconnected)
             {
@@ -491,11 +1029,18 @@ else if (_mesh != null)
                 if (_reach != null && _reach.Reroutes.TryGetValue(target.MacAddress, out var neighbours))
                 {
                     _alternatives.AddRange(neighbours);
+                    _hopSet.UnionWith(neighbours);
                 }
             }
             else
             {
                 _routeMessage = $"{target.Name} is cut off, every way to the gateway runs through a quiet device.";
+
+                // The quiet neighbours are what is holding it up, so they are listed and drawn.
+                _blockers.AddRange(_mesh.Nodes
+                    .Where(n => n.Disconnected && _neighbours.Contains(n.MacAddress))
+                    .Select(n => n.MacAddress)
+                    .OrderBy(mac => mac, StringComparer.Ordinal));
             }
 
             return;
@@ -504,7 +1049,7 @@ else if (_mesh != null)
         // Walk up the parents to the gateway, then turn it round so the gateway comes first.
         var macs = new List<string> { target.MacAddress };
 
-        while (macs.Count <= _mesh.Nodes.Count && _tree.Parents.TryGetValue(macs[^1], out var parent))
+        while (macs.Count <= _mesh.Nodes.Count && _drawParents.TryGetValue(macs[^1], out var parent))
         {
             macs.Add(parent);
         }
@@ -532,10 +1077,11 @@ else if (_mesh != null)
         }
     }
 
-    //places the gateway in the middle and every other device round one circle, in the order the api listed them
+    //works out where everything is drawn, laying the devices out again only when the mesh has really changed
     private void BuildLayout()
     {
         _spots.Clear();
+        _rings.Clear();
         _treePairs.Clear();
         _quiet.Clear();
         _rssi.Clear();
@@ -545,22 +1091,48 @@ else if (_mesh != null)
             return;
         }
 
-        var others = _mesh.Nodes.Where(n => !n.IsGateway).ToList();
+        var devices = _mesh.Nodes.Where(n => !n.IsGateway).ToList();
 
-        for (var i = 0; i < others.Count; i++)
+        var change = UpdateDrawnTree(devices);
+
+        if (change == LayoutChange.Full)
         {
-            var angle = 2 * Math.PI * i / others.Count;
+            foreach (var node in _mesh.Nodes)
+            {
+                if (node.IsGateway)
+                {
+                    _spots[node.MacAddress] = (Centre, Centre);
+                }
+            }
 
-            _spots[others[i].MacAddress] = (Centre + CircleRadius * Math.Cos(angle), Centre + CircleRadius * Math.Sin(angle));
+            PlaceDevices(devices);
+            HoldLayout();
+        }
+        else if (change == LayoutChange.Local)
+        {
+            // Why: a device going quiet or coming back should not shift everyone else, so only that device is moved.
+            foreach (var (mac, spot) in _heldSpots)
+            {
+                _spots[mac] = spot;
+            }
+
+            _rings.AddRange(_heldRings);
+            PlaceLocally(devices);
+            HoldLayout();
+        }
+        else
+        {
+            // Why: the signal on a link wobbles, so the same devices are kept where they were drawn and only the colours and links update.
+            foreach (var (mac, spot) in _heldSpots)
+            {
+                _spots[mac] = spot;
+            }
+
+            _rings.AddRange(_heldRings);
         }
 
         foreach (var node in _mesh.Nodes)
         {
-            if (node.IsGateway)
-            {
-                _spots[node.MacAddress] = (Centre, Centre);
-            }
-
             if (node.Disconnected)
             {
                 _quiet.Add(node.MacAddress);
@@ -572,13 +1144,345 @@ else if (_mesh != null)
             _rssi[PairKey(link.MacA, link.MacB)] = link.Rssi;
         }
 
-        if (_tree != null)
+        foreach (var (child, parent) in _drawParents)
         {
-            foreach (var edge in _tree.Edges)
+            _treePairs.Add(PairKey(child, parent));
+        }
+    }
+
+    private enum LayoutChange
+    {
+        None,
+        Local,
+        Full
+    }
+
+    //brings the drawn tree up to date with the api's, and says whether the devices have to be laid out again, or only the ones that came or went moved
+    private LayoutChange UpdateDrawnTree(List<TopologyNode> devices)
+    {
+        var live = _tree?.Parents ?? new Dictionary<string, string>();
+
+        // The first load, a device coming or going, or one leaving or rejoining the tree (gone quiet, cut off, back again) is a real change, so the live tree is taken as it is.
+        var sameDevices = _heldSpots.Count == devices.Count + 1
+            && devices.All(d => _heldSpots.ContainsKey(d.MacAddress))
+            && _drawParents.Count == live.Count
+            && live.Keys.All(_drawParents.ContainsKey);
+
+        if (!sameDevices)
+        {
+            // Only devices leaving or joining the tree, with nobody else changing parent, can be dealt with by moving just those devices.
+            var nobodyElseMoved = _heldSpots.Count == devices.Count + 1
+                && devices.All(d => _heldSpots.ContainsKey(d.MacAddress))
+                && _drawParents.All(kv => !live.TryGetValue(kv.Key, out var parent)
+                    || string.Equals(kv.Value, parent, StringComparison.OrdinalIgnoreCase));
+
+            AdoptLiveTree(live);
+
+            var fits = _drawParents.Keys.All(mac => DepthInTree(mac) + 1 <= _ringCapacity);
+
+            return nobodyElseMoved && fits ? LayoutChange.Local : LayoutChange.Full;
+        }
+
+        var changed = false;
+
+        foreach (var (child, parent) in live)
+        {
+            if (string.Equals(_drawParents[child], parent, StringComparison.OrdinalIgnoreCase))
             {
-                _treePairs.Add(PairKey(edge.MacA, edge.MacB));
+                _parentVotes.Remove(child);
+                continue;
+            }
+
+            var count = _parentVotes.TryGetValue(child, out var vote) && string.Equals(vote.Candidate, parent, StringComparison.OrdinalIgnoreCase)
+                ? vote.Count + 1
+                : 1;
+
+            if (count < ParentChangeRefreshes)
+            {
+                _parentVotes[child] = (parent, count);
+                continue;
+            }
+
+            _drawParents[child] = parent;
+            _parentVotes.Remove(child);
+            changed = true;
+        }
+
+        // Why: parents that change one device at a time can leave a loop, so the live tree is used as it is if they no longer lead to the gateway.
+        if (changed && !AllReachGateway())
+        {
+            AdoptLiveTree(live);
+        }
+
+        return changed ? LayoutChange.Full : LayoutChange.None;
+    }
+
+    //counts the steps up the drawn tree from a device to the gateway
+    private int DepthInTree(string mac)
+    {
+        var depth = 0;
+
+        // The count guards against a loop in the parents, which should never happen.
+        while (depth <= _drawParents.Count && _drawParents.TryGetValue(mac, out var parent))
+        {
+            mac = parent;
+            depth++;
+        }
+
+        return depth;
+    }
+
+    //moves only the devices that went quiet or came back: the first to the outer ring, the second next to its parent
+    private void PlaceLocally(List<TopologyNode> devices)
+    {
+        var outer = RingRadius(_ringCapacity);
+        var outside = devices.Where(d => !_drawParents.ContainsKey(d.MacAddress)).OrderBy(d => d.MacAddress, StringComparer.Ordinal).ToList();
+
+        // A device that was on the outer ring and is in the tree again is one that came back.
+        var joining = devices
+            .Where(d => _drawParents.ContainsKey(d.MacAddress) && Math.Abs(DistanceFromMiddle(d.MacAddress) - outer) < 1)
+            .OrderBy(d => DepthInTree(d.MacAddress))
+            .ToList();
+
+        PlaceOnRing(outside, outer);
+
+        foreach (var device in joining)
+        {
+            var parent = _drawParents[device.MacAddress];
+            var from = _spots.TryGetValue(parent, out var parentSpot) ? Math.Atan2(parentSpot.Y - Centre, parentSpot.X - Centre) : 0;
+            var radius = RingRadius(DepthInTree(device.MacAddress));
+
+            // Starts straight out from the parent and moves round a little at a time until there is room for the device.
+            for (var step = 0; step < 120; step++)
+            {
+                var offset = (step % 2 == 0 ? 1 : -1) * ((step + 1) / 2) * 0.08;
+                var spot = (X: Centre + radius * Math.Cos(from + offset), Y: Centre + radius * Math.Sin(from + offset));
+
+                if (_spots.All(other => other.Key == device.MacAddress || Distance(other.Value, spot) >= 3 * NodeRadius))
+                {
+                    _spots[device.MacAddress] = spot;
+                    break;
+                }
             }
         }
+    }
+
+    //works out how far a drawn device is from the middle of the drawing
+    private double DistanceFromMiddle(string mac)
+    {
+        return _spots.TryGetValue(mac, out var spot) ? Distance(spot, (Centre, Centre)) : 0;
+    }
+
+    //works out the straight line distance between two points in the drawing
+    private static double Distance((double X, double Y) a, (double X, double Y) b)
+    {
+        var x = a.X - b.X;
+        var y = a.Y - b.Y;
+
+        return Math.Sqrt(x * x + y * y);
+    }
+
+    //copies the api's tree as the one to draw
+    private void AdoptLiveTree(Dictionary<string, string> live)
+    {
+        _drawParents.Clear();
+        _parentVotes.Clear();
+
+        foreach (var (child, parent) in live)
+        {
+            _drawParents[child] = parent;
+        }
+    }
+
+    //says whether every device in the drawn tree leads up to the gateway without going round in a loop
+    private bool AllReachGateway()
+    {
+        var gateway = _mesh?.Nodes.FirstOrDefault(n => n.IsGateway)?.MacAddress;
+
+        foreach (var child in _drawParents.Keys)
+        {
+            var current = child;
+            var steps = 0;
+
+            while (_drawParents.TryGetValue(current, out var parent))
+            {
+                current = parent;
+
+                if (++steps > _drawParents.Count)
+                {
+                    return false;
+                }
+            }
+
+            if (!string.Equals(current, gateway, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    //remembers what was just drawn so the next refreshes can keep it
+    private void HoldLayout()
+    {
+        _heldSpots.Clear();
+        _heldRings.Clear();
+
+        foreach (var (mac, spot) in _spots)
+        {
+            _heldSpots[mac] = spot;
+        }
+
+        _heldRings.AddRange(_rings);
+    }
+
+    //puts each device on a ring for how many hops it is from the gateway, each branch of the tree in its own slice of the circle
+    private void PlaceDevices(List<TopologyNode> devices)
+    {
+        _rings.Clear();
+
+        var gateway = _mesh?.Nodes.FirstOrDefault(n => n.IsGateway);
+
+        if (_drawParents.Count == 0 || gateway == null)
+        {
+            AddRings();
+            PlaceOnRing(devices.OrderBy(n => n.MacAddress, StringComparer.Ordinal).ToList(), RingRadius(_ringCapacity));
+            return;
+        }
+
+        var children = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (child, parent) in _drawParents)
+        {
+            if (!children.TryGetValue(parent, out var list))
+            {
+                list = new List<string>();
+                children[parent] = list;
+            }
+
+            list.Add(child);
+        }
+
+        foreach (var list in children.Values)
+        {
+            list.Sort(StringComparer.Ordinal);
+        }
+
+        // One walk to count the leaves under each device and how deep it is, so a branch can be given room in line with its size.
+        var leaves = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var depths = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        int Count(string mac, int depth)
+        {
+            depths[mac] = depth;
+
+            // The depth check stops a loop in the parents, which should never happen.
+            if (!children.TryGetValue(mac, out var below) || depth > _mesh!.Nodes.Count)
+            {
+                return leaves[mac] = 1;
+            }
+
+            return leaves[mac] = below.Sum(child => Count(child, depth + 1));
+        }
+
+        Count(gateway.MacAddress, 0);
+
+        var outside = devices.Where(d => !depths.ContainsKey(d.MacAddress)).ToList();
+        var deepest = depths.Values.Max();
+
+        // Why: a deeper tree makes the drawing area bigger, it never makes it smaller again.
+        _ringCapacity = Math.Max(_ringCapacity, deepest + 1);
+
+        void Spread(string mac, double from, double to)
+        {
+            if (depths[mac] > 0)
+            {
+                var angle = (from + to) / 2 - Math.PI / 2;
+                var radius = RingRadius(depths[mac]);
+
+                _spots[mac] = (Centre + radius * Math.Cos(angle), Centre + radius * Math.Sin(angle));
+            }
+
+            if (!children.TryGetValue(mac, out var below) || depths[mac] > _mesh!.Nodes.Count)
+            {
+                return;
+            }
+
+            var cursor = from;
+
+            foreach (var child in below)
+            {
+                var share = (to - from) * leaves[child] / leaves[mac];
+
+                Spread(child, cursor, cursor + share);
+                cursor += share;
+            }
+        }
+
+        Spread(gateway.MacAddress, 0, 2 * Math.PI);
+
+        AddRings();
+
+        // A device with no place in the tree is quiet or cut off, so it goes on the outermost ring whatever the depth is.
+        PlaceOnRing(outside.OrderBy(n => n.MacAddress, StringComparer.Ordinal).ToList(), RingRadius(_ringCapacity));
+    }
+
+    //adds a guide ring for every hop count the drawing has room for, and the outer ring for devices with no route
+    private void AddRings()
+    {
+        for (var ring = 1; ring < _ringCapacity; ring++)
+        {
+            _rings.Add((RingRadius(ring), ring == 1 ? "1 hop" : $"{ring} hops"));
+        }
+
+        _rings.Add((RingRadius(_ringCapacity), "No route"));
+    }
+
+    //works out how far from the middle a ring sits, the same step for every ring
+    private static double RingRadius(int ring)
+    {
+        return InnerRadius + (ring - 1) * RingStep;
+    }
+
+    //works out the part of the drawing that is on show, the whole of it or a closer look centred on the picked device
+    private string ViewBox()
+    {
+        var half = RingRadius(_ringCapacity) + CanvasMargin;
+        var size = half / _zoom;
+        var focus = _zoom > 1 && ChosenDevice() is { } picked ? Position(picked.MacAddress) : (X: Centre, Y: Centre);
+
+        // The box is kept inside the drawing so zooming on a device at the edge does not show empty space.
+        var x = Math.Clamp(focus.X, Centre - half + size, Centre + half - size);
+        var y = Math.Clamp(focus.Y, Centre - half + size, Centre + half - size);
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+
+        return string.Join(' ', (x - size).ToString("0.#", culture), (y - size).ToString("0.#", culture), (2 * size).ToString("0.#", culture), (2 * size).ToString("0.#", culture));
+    }
+
+    //steps the zoom in or out, one step at a time
+    private void Zoom(int direction)
+    {
+        var index = Array.IndexOf(ZoomSteps, _zoom) + direction;
+
+        _zoom = ZoomSteps[Math.Clamp(index, 0, ZoomSteps.Length - 1)];
+    }
+
+    //spreads devices evenly round one ring, leaving the very top free for the ring's label
+    private void PlaceOnRing(List<TopologyNode> devices, double radius)
+    {
+        for (var i = 0; i < devices.Count; i++)
+        {
+            var angle = 2 * Math.PI * (i + 0.5) / devices.Count - Math.PI / 2;
+
+            _spots[devices[i].MacAddress] = (Centre + radius * Math.Cos(angle), Centre + radius * Math.Sin(angle));
+        }
+    }
+
+    //says whether a device gets its name written on the drawing
+    private bool ShowLabel(TopologyNode node)
+    {
+        return node.IsGateway || IsSelected(node) || _neighbours.Contains(node.MacAddress);
     }
 
     //joins two macs in a fixed order so a link reads the same from either end
@@ -668,11 +1572,28 @@ else if (_mesh != null)
     //reloads the mesh when the api says the stream moved on
     private void OnStreamChanged()
     {
+        // The next push or the poll catches up, so one that comes too soon is just dropped.
+        if (_paused || Environment.TickCount64 - _lastLoadTick < MinReloadMilliseconds)
+        {
+            return;
+        }
+
         _ = InvokeAsync(async () =>
         {
             await LoadMeshAsync();
             StateHasChanged();
         });
+    }
+
+    //stops the drawing reloading so it can be read, and catches it up again when it is let go
+    private async Task TogglePause()
+    {
+        _paused = !_paused;
+
+        if (!_paused)
+        {
+            await LoadMeshAsync();
+        }
     }
 
     private async Task PollAsync(CancellationToken token)
@@ -686,6 +1607,11 @@ else if (_mesh != null)
                 if (!State.Connected)
                 {
                     await State.StartAsync();
+                }
+
+                if (_paused)
+                {
+                    continue;
                 }
 
                 await LoadMeshAsync();
@@ -706,6 +1632,7 @@ else if (_mesh != null)
         }
 
         _loading = true;
+        _lastLoadTick = Environment.TickCount64;
 
         try
         {

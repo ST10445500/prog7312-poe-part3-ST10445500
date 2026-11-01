@@ -107,7 +107,8 @@ namespace SmartX.Api.Controllers
                 // A neighbour that has only been heard about has no name or hop count yet.
                 Name = device?.Name ?? mac,
                 HopCount = device?.Radio.HopCount,
-                Disconnected = quiet.Contains(mac)
+                Disconnected = quiet.Contains(mac),
+                LastSeen = device?.LastSeen
             };
         }
     }

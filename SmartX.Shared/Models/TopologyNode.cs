@@ -24,6 +24,9 @@ namespace SmartX.Shared.Models
 
         //whether the device has gone quiet
         public bool Disconnected { get; set; }
+
+        //when the stream last heard from the device, or null if it has only been heard about by a neighbour
+        public DateTime? LastSeen { get; set; }
     }
 }
 
